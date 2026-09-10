@@ -1,0 +1,6 @@
+{
+  "name": "Bomber Financeiro",
+  "description": "Sistema mobile-first de controle financeiro interno para academia com perfis Admin e Professor, fluxo rápido de mensalidades, despesas e caixa.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
