@@ -8,6 +8,7 @@ import {
   formatDateBR,
   getTodayDateStr,
 } from '../services/financeService';
+import { queryMensalidades, MensalidadeApi } from '../services/mensalidadesApi';
 import {
   Search,
   UserPlus,
@@ -90,6 +91,83 @@ export const StudentsList: React.FC<StudentsListProps> = ({
   const planos = financeService.getPlanos();
   const financeiroDisponivel = false;
 
+  const [mensalidadesByStudent, setMensalidadesByStudent] = useState<Record<string, MensalidadeApi[]>>({});
+  const [mensalidadesError, setMensalidadesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const mensalidades = await queryMensalidades();
+        if (!active) return;
+        const grouped: Record<string, MensalidadeApi[]> = {};
+        for (const m of mensalidades) {
+          const sid = (m as any).studentId || (m as any).studentId;
+          if (!grouped[sid]) grouped[sid] = [];
+          grouped[sid].push(m);
+        }
+
+        for (const k of Object.keys(grouped)) {
+          grouped[k].sort((a, b) => {
+            const aKey = a.anoMes ?? a.competencia ?? '';
+            const bKey = b.anoMes ?? b.competencia ?? '';
+            if (aKey !== bKey) return bKey.localeCompare(aKey);
+            return (b.createdAt || '').localeCompare(a.createdAt || '');
+          });
+        }
+
+        setMensalidadesByStudent(grouped);
+      } catch (err: any) {
+        console.error('Erro ao carregar mensalidades:', err);
+        if (!active) return;
+        setMensalidadesError(err?.message || 'Erro ao carregar mensalidades');
+      }
+    })();
+
+    return () => { active = false; };
+  }, []);
+
+  // Helpers locais mínimos para exibir dados sem chamar financeService
+  const formatDateCivil = (iso?: string) => {
+    if (!iso) return '';
+    // espera 'YYYY-MM-DD' ou 'YYYY-MM-DDTHH:mm:ss...'
+    const datePart = iso.split('T')[0];
+    const [y, m, d] = datePart.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const formatCompetenciaLocal = (comp?: string) => {
+    if (!comp) return '';
+    // ISO-like 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:..' -> MM/YYYY
+    const iso = comp.split('T')[0];
+    const isoMatch = iso.match(/^(\d{4})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[2]}/${isoMatch[1]}`;
+
+    // Already 'MM/YYYY'
+    if (/^\d{2}\/\d{4}$/.test(comp)) return comp;
+
+    // Month name like 'Setembro/2026' -> map to MM/YYYY
+    const parts = comp.split('/');
+    if (parts.length === 2) {
+      const mesNome = parts[0].trim().toLowerCase();
+      const ano = parts[1].trim();
+      const meses: Record<string,string> = {
+        janeiro: '01', fevereiro: '02', março: '03', abril: '04', maio: '05', junho: '06',
+        julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12',
+      };
+      if (meses[mesNome]) return `${meses[mesNome]}/${ano}`;
+    }
+
+    return comp;
+  };
+
+  const formatCurrencyLocal = (val?: string | number) => {
+    if (val === undefined || val === null) return '';
+    const n = typeof val === 'string' ? parseFloat(val) : (val as number);
+    if (Number.isNaN(n)) return String(val);
+    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
   const toggleExpand = (id: string) => {
     setExpandedAlunoId(expandedAlunoId === id ? null : id);
   };
@@ -161,9 +239,22 @@ export const StudentsList: React.FC<StudentsListProps> = ({
         <div className="space-y-2.5">
           {alunos.map((aluno) => {
             const plano = planos.find((p) => p.id === aluno.planoId);
-            const mensalidade = financeiroDisponivel
-              ? financeService.getMensalidadeAtualDoAluno(aluno.id)
-              : undefined;
+            // Seleciona mensalidade relevante a partir do resultado da API (sem N+1)
+            const mensalidadesApi = mensalidadesByStudent[aluno.id] ?? [];
+            const mensalidade = (() => {
+              if (!mensalidadesApi || mensalidadesApi.length === 0) return undefined;
+
+              const inicial = mensalidadesApi.find((m) => m.isPagamentoInicial && (m.status === 'PENDENTE' || m.status === 'AGUARDANDO_CONFIRMACAO'));
+              if (inicial) return inicial as unknown as Mensalidade;
+
+              const abertas = mensalidadesApi.filter((m) => ['ATRASADA','PENDENTE','AGUARDANDO_CONFIRMACAO'].includes(m.status));
+              if (abertas.length > 0) {
+                abertas.sort((a, b) => (a.dataVencimento || '').localeCompare(b.dataVencimento || ''));
+                return abertas[0] as unknown as Mensalidade;
+              }
+
+              return mensalidadesApi[0] as unknown as Mensalidade;
+            })();
             const isExpanded = expandedAlunoId === aluno.id;
 
             // O valor financeiro exibido vem da mensalidade vigente da competência
@@ -361,11 +452,39 @@ export const StudentsList: React.FC<StudentsListProps> = ({
                         )}
                       </div>
 
-                      {!financeiroDisponivel && (
+                      {!financeiroDisponivel && (mensalidade ? (
+                        <div className="p-2.5 rounded-xl bg-zinc-950/70 border border-white/10 space-y-2 text-xs">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-zinc-500 block text-[10px] font-medium">Valor:</span>
+                              <span className="font-semibold text-zinc-200">{formatCurrencyLocal((mensalidade as any).valor)}</span>
+                            </div>
+
+                            <div>
+                              <span className="text-zinc-500 block text-[10px] font-medium">Competência:</span>
+                                <span className="font-semibold text-zinc-200">{formatCompetenciaLocal((mensalidade as any).competencia)}</span>
+                            </div>
+
+                            <div>
+                              <span className="text-zinc-500 block text-[10px] font-medium">Vencimento:</span>
+                              <span className="font-semibold text-zinc-200">{formatDateCivil((mensalidade as any).dataVencimento)}</span>
+                            </div>
+
+                            <div>
+                              <span className="text-zinc-500 block text-[10px] font-medium">Status:</span>
+                              <span className="font-bold text-white">
+                                {(mensalidade as any).isPagamentoInicial && (mensalidade as any).status === 'PENDENTE'
+                                  ? 'Pagamento inicial pendente'
+                                  : (mensalidade as any).status}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
                         <p className="text-xs text-zinc-400">
                           Dados financeiros serão disponibilizados após a migração das mensalidades.
                         </p>
-                      )}
+                      ))}
 
                       {/* Histórico do Último Pagamento com Data Real vs Vencimento */}
                       {financeiroDisponivel && ultimoPagamento && (
