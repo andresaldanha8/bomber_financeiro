@@ -3,6 +3,10 @@ import { useAuth } from '../context/AuthContext';
 import { financeService, formatCurrency, formatDateBR } from '../services/financeService';
 import { Aluno, AlunoStatus } from '../types';
 import { X, UserPlus, AlertCircle, Info, Lock, Pencil, Shield, CheckCircle2 } from 'lucide-react';
+import {
+  createStudent,
+  updateStudent,
+} from '../services/studentsApi';
 
 interface StudentFormModalProps {
   isOpen: boolean;
@@ -19,9 +23,10 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
 }) => {
   const { currentUser } = useAuth();
   const planos = financeService.getPlanos();
+  const financeiroDisponivel = false;
 
   const isEditing = !!alunoParaEditar;
-  const isAdmin = currentUser.role === 'ADMIN';
+  const isAdmin = currentUser?.role === 'ADMIN';
 
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
@@ -58,68 +63,72 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
   if (!isOpen) return null;
 
   const selectedPlano = planos.find((p) => p.id === planoId) || planos[0];
-  const valorPrimeiraMensalidade = financeService.getValorPrimeiraMensalidade(planoId);
+  const valorPrimeiraMensalidade = financeiroDisponivel
+    ? financeService.getValorPrimeiraMensalidade(planoId)
+    : 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nome.trim()) {
-      setErrorMsg('Informe o nome completo do aluno.');
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (!nome.trim()) {
+    setErrorMsg('Informe o nome completo do aluno.');
+    return;
+  }
+
+  const diaNum = parseInt(diaVencimento, 10);
+
+  if (!isEditing || isAdmin) {
+    if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
+      setErrorMsg('Dia de vencimento deve estar entre 1 e 31.');
       return;
     }
+  }
 
-    const diaNum = parseInt(diaVencimento, 10);
-    if (!isEditing || isAdmin) {
-      if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
-        setErrorMsg('Dia de vencimento deve estar entre 1 e 31.');
-        return;
-      }
+  try {
+    setLoading(true);
+    setErrorMsg('');
+
+    if (isEditing && alunoParaEditar) {
+      await updateStudent(
+        alunoParaEditar.id,
+        {
+          nome,
+          telefone,
+          observacao,
+          ...(isAdmin
+            ? {
+                dataEntrada,
+                diaVencimento: diaNum,
+                planoId,
+                status,
+              }
+            : {}),
+        },
+      );
+
+      onSuccess(nome, true);
+    } else {
+      await createStudent({
+        nome,
+        telefone,
+        dataEntrada,
+        diaVencimento: diaNum,
+        planoId,
+        observacao,
+      });
+
+      onSuccess(nome, false);
     }
 
-    try {
-      setLoading(true);
-      setErrorMsg('');
-
-      if (isEditing && alunoParaEditar) {
-        financeService.atualizarAluno(
-          alunoParaEditar.id,
-          {
-            nome,
-            telefone,
-            observacao,
-            ...(isAdmin
-              ? {
-                  dataEntrada,
-                  diaVencimento: diaNum,
-                  planoId,
-                  status,
-                }
-              : {}),
-          },
-          currentUser
-        );
-        onSuccess(nome, true);
-      } else {
-        financeService.cadastrarAluno(
-          {
-            nome,
-            telefone,
-            dataEntrada,
-            diaVencimento: diaNum,
-            planoId,
-            observacao,
-          },
-          currentUser
-        );
-        onSuccess(nome, false);
-      }
-
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao processar dados do aluno.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    onClose();
+  } catch (err: any) {
+    setErrorMsg(
+      err?.message || 'Erro ao processar dados do aluno.',
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div
@@ -372,6 +381,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
               </div>
 
               {/* Informação e Resumo da Regra Comercial */}
+              {financeiroDisponivel && (
               <div className="p-3.5 rounded-2xl bg-black/40 border border-white/10 space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-300 font-semibold">
@@ -400,6 +410,7 @@ export const StudentFormModal: React.FC<StudentFormModalProps> = ({
                   </span>
                 </div>
               </div>
+              )}
             </>
           )}
 

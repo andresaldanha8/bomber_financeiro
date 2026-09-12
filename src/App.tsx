@@ -320,7 +320,7 @@ if (!isAuthenticated || !currentUser) {
             isEdicao ? 'Dados do Aluno Atualizados!' : 'Aluno Cadastrado com Sucesso!',
             isEdicao
               ? `As alterações no cadastro de ${nomeAluno} foram salvas com sucesso.`
-              : `${nomeAluno} foi cadastrado e sua primeira mensalidade foi gerada.`
+              : `${nomeAluno} foi cadastrado com sucesso.`
           );
         }}
       />

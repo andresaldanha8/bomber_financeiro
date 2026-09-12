@@ -1,8 +1,11 @@
 import 'dotenv/config';
+
 import express from 'express';
 import cookieParser from 'cookie-parser';
+
 import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
+import studentsRoutes from './routes/students.routes';
 
 const app = express();
 
@@ -20,6 +23,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin/users', usersRoutes);
+app.use('/api/students', studentsRoutes);
 
 app.listen(PORT, () => {
   console.log(`Bomber Financeiro API rodando em http://localhost:${PORT}`);
