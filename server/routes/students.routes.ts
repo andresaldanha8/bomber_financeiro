@@ -8,6 +8,11 @@ import {
   AuthenticatedRequest,
   requireAuth,
 } from '../middleware/auth.middleware';
+import {
+  aplicarTransicaoStatusStudent,
+  TransicaoStatusStudent,
+} from '../services/mensalidades.service';
+import { dataCivilDoInstante } from '../domain/financeDates';
 
 const router = Router();
 
@@ -351,7 +356,58 @@ router.patch('/:id', async (req: AuthenticatedRequest, res) => {
         });
       }
 
-      data.status = status;
+      // Executar transação que decide a transição real, aplica lock, e
+      // atualiza status + períodos na mesma transação usando funções de
+      // domínio. Outras alterações administrativas (entryCondition, dueDay,
+      // entryDate) também são aplicadas na mesma transação quando fornecidas.
+      try {
+        const updatedStudent = await executarTransacaoComRetry(prisma, async (tx) => {
+          // Ler estado atual sob a mesma transação para fornecer
+          // `statusAnterior` ao domínio, preservando o contrato de
+          // transição (periodoEsperadoId se fornecido pelo cliente).
+          const persisted = await tx.student.findUniqueOrThrow({ where: { id: req.params.id } });
+
+          // Observar último período relevante sob a mesma transação para
+          // preservar o contrato de transição (periodoEsperadoId).
+          const latest = await tx.studentActivityPeriod.findFirst({
+            where: { studentId: req.params.id },
+            orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          });
+
+          const input: TransicaoStatusStudent = {
+            studentId: req.params.id,
+            statusAnterior: persisted.status,
+            statusNovo: status,
+            dataEfetiva: dataCivilDoInstante(new Date()),
+            periodoEsperadoId: latest?.id ?? null,
+          };
+
+          const actor = { id: req.authUser!.id };
+
+          // Executa a transição (pode lançar erros controlados do domínio).
+          await aplicarTransicaoStatusStudent(tx, input, actor);
+
+          // Aplicar demais alterações administrativas, se houver.
+          const adminUpdate: any = {};
+          if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'entryCondition') && data.entryCondition !== undefined) adminUpdate.entryCondition = data.entryCondition;
+          if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'dueDay') && data.dueDay !== undefined) adminUpdate.dueDay = data.dueDay;
+          if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'entryDate') && data.entryDate !== undefined) adminUpdate.entryDate = data.entryDate;
+
+          if (Object.keys(adminUpdate).length > 0) {
+            await tx.student.update({ where: { id: req.params.id }, data: adminUpdate });
+          }
+
+          // Retornar Student atualizado no formato público.
+          return tx.student.findUniqueOrThrow({ where: { id: req.params.id }, select: studentSelect });
+        });
+
+        return res.status(200).json({ student: updatedStudent });
+      } catch (error: any) {
+        console.error('Erro na transição de status do aluno:', error);
+        // Erros controlados do domínio devem ser repassados com mensagens
+        // amigáveis; detalhes internos não são expostos.
+        return res.status(400).json({ message: error?.message ?? 'Erro ao aplicar transição de status.' });
+      }
     }
 
     if (Object.keys(data).length === 0) {
