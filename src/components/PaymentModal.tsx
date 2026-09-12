@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Aluno, FormaPagamento, Mensalidade } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { financeService, formatCurrency, formatDateBR, getTodayDateStr } from '../services/financeService';
+import pagamentosApi, { RegisterPaymentPayload } from '../services/pagamentosApi';
 import {
   X,
   QrCode,
@@ -18,7 +18,7 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   aluno: Aluno;
-  mensalidade?: Mensalidade;
+  mensalidade?: Mensalidade & { isPagamentoInicial?: boolean; diaBaseNaGeracao?: number };
   onSuccess: (forma: FormaPagamento) => void;
 }
 
@@ -29,7 +29,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   mensalidade,
   onSuccess,
 }) => {
-  const { currentUser } = useAuth();
+  const { isAdmin, isProfessor } = useAuth();
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('PIX');
   const [observacao, setObservacao] = useState('');
   const [loading, setLoading] = useState(false);
@@ -45,9 +45,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Se não foi passada a mensalidade, busca a atual do aluno
-  const currentMensalidade =
-    mensalidade || financeService.getMensalidadeAtualDoAluno(aluno.id);
+  // PaymentModal MUST receive the mensalidade prop (use provided mensalidade)
+  const currentMensalidade = mensalidade;
 
   const valor = currentMensalidade ? currentMensalidade.valor : aluno.valorMensalidade;
   const competencia = currentMensalidade ? currentMensalidade.competencia : 'Outubro/2026';
@@ -55,41 +54,93 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     ? currentMensalidade.dataVencimento
     : `2026-10-${String(aluno.diaVencimento).padStart(2, '0')}`;
 
-  const hoje = getTodayDateStr();
-  const isAdmin = currentUser.role === 'ADMIN';
+  // Today's date in application timezone (America/Sao_Paulo) as YYYY-MM-DD
+  const getTodayDateStrLocal = (): string => {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')!.value;
+    const m = parts.find((p) => p.type === 'month')!.value;
+    const d = parts.find((p) => p.type === 'day')!.value;
+    return `${y}-${m}-${d}`;
+  };
 
-  const isPagamentoInicial = financeService.isPagamentoInicialPendente(aluno.id);
+  const hoje = getTodayDateStrLocal();
+  const isAdminLocal = isAdmin;
+
+  const isPagamentoInicial = !!currentMensalidade && !!currentMensalidade.isPagamentoInicial && currentMensalidade.status === 'PENDENTE';
 
   // Classificação do momento do pagamento (operacional / visual)
   const isAntecipado = !isPagamentoInicial && !!dataVenc && hoje < dataVenc;
   const isNoVencimento = !isPagamentoInicial && !!dataVenc && hoje === dataVenc;
   const isAposVencimento = !isPagamentoInicial && !!dataVenc && hoje > dataVenc;
 
-  const handleSubmit = (formaEscolhida?: FormaPagamento) => {
+  const formatCurrency = (val: any) => {
+    const n = typeof val === 'string' ? parseFloat(val) : val;
+    if (Number.isNaN(n)) return String(val);
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
+  };
+
+  const formatDateBR = (dateStr: string) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('T')[0].split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dateStr;
+  };
+
+  const formatCompetencia = (comp?: string) => {
+    if (!comp) return '';
+    // Handle ISO-like 'YYYY-MM' or 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:..' -> MM/YYYY
+    const isoMatch = comp.match(/^(\d{4})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[2]}/${isoMatch[1]}`;
+
+    // Already in MM/YYYY
+    if (/^\d{2}\/\d{4}$/.test(comp)) return comp;
+
+    // Month name like 'Setembro/2026' -> map to MM/YYYY
+    const parts = comp.split('/');
+    if (parts.length === 2) {
+      const mesNome = parts[0].trim().toLowerCase();
+      const ano = parts[1].trim();
+      const meses: Record<string,string> = {
+        janeiro: '01', fevereiro: '02', março: '03', abril: '04', maio: '05', junho: '06',
+        julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12',
+      };
+      if (meses[mesNome]) return `${meses[mesNome]}/${ano}`;
+    }
+
+    return comp;
+  };
+
+  const handleSubmit = async (formaEscolhida?: FormaPagamento) => {
     const forma = formaEscolhida || formaPagamento;
     if (!currentMensalidade) {
       setErrorMsg('Não foi encontrada mensalidade em aberto para este aluno.');
       return;
     }
 
+    setLoading(true);
+    setErrorMsg('');
+
     try {
-      setLoading(true);
-      setErrorMsg('');
-      if (isAdmin) {
-        financeService.confirmarRecebimentoDiretoAdmin(
-          currentMensalidade.id,
-          forma,
-          currentUser,
-          observacao
-        );
-      } else {
-        financeService.registrarPagamentoAluno(
-          currentMensalidade.id,
-          forma,
-          currentUser,
-          observacao
-        );
+      if (isAdminLocal) {
+        // Admin financial flow is disabled during this homologation.
+        setErrorMsg('Fluxo de registro/confirmacao pelo ADMIN está temporariamente desabilitado.');
+        return;
       }
+
+      if (!isProfessor) {
+        setErrorMsg('Somente professores podem registrar pagamentos nesta versão.');
+        return;
+      }
+
+      // PROFESSOR: call real API with typed payload
+      const payload: RegisterPaymentPayload = {
+        formaPagamento: forma,
+        dataPagamento: hoje,
+        observacao: observacao?.trim() || undefined,
+      };
+
+      await pagamentosApi.registerStudentPayment(currentMensalidade.id, payload);
+
       onSuccess(forma);
       onClose();
     } catch (err: any) {
@@ -164,8 +215,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-400">Competência:</span>
-              <span className="text-xs font-bold text-zinc-300 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
-                {competencia}
+                <span className="text-xs font-bold text-zinc-300 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/10">
+                {formatCompetencia(competencia)}
               </span>
             </div>
 
@@ -200,7 +251,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
             <div className="flex items-center justify-between pt-2.5 border-t border-white/10">
               <span className="text-xs font-semibold text-zinc-400">Valor da Mensalidade:</span>
-              <span className="text-lg font-black text-lime-400">
+                <span className="text-lg font-black text-lime-400">
                 {formatCurrency(valor)}
               </span>
             </div>

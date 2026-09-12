@@ -29,7 +29,7 @@ export const StudentsList: React.FC<StudentsListProps> = ({
   onOpenStudentModal,
   onEditStudent,
 }) => {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isProfessor } = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVO' | 'INATIVO'>('ATIVO');
   const [expandedAlunoId, setExpandedAlunoId] = useState<string | null>(null);
@@ -159,6 +159,15 @@ export const StudentsList: React.FC<StudentsListProps> = ({
     }
 
     return comp;
+  };
+
+  const formatStatusLabel = (status?: string) => {
+    if (!status) return '';
+    if (status === 'AGUARDANDO_CONFIRMACAO') return 'Aguardando confirmação';
+    if (status === 'PENDENTE') return 'Pendente';
+    if (status === 'QUITADA') return 'Quitada';
+    if (status === 'ATRASADA') return 'Atrasada';
+    return status;
   };
 
   const formatCurrencyLocal = (val?: string | number) => {
@@ -441,7 +450,7 @@ export const StudentsList: React.FC<StudentsListProps> = ({
                               {isPagamentoInicial
                                 ? `Pagamento inicial de ${mensalidade?.competencia || 'Setembro/2026'} pendente`
                                 : isAguardando
-                                  ? `${mensalidade?.competencia} (Aguardando Confirmação)`
+                                  ? `${mensalidade?.competencia} (${formatStatusLabel(mensalidade?.status)})`
                                   : isQuitada
                                     ? `${mensalidade?.competencia} (Quitada)`
                                     : mensalidade
@@ -627,7 +636,11 @@ export const StudentsList: React.FC<StudentsListProps> = ({
                           </button>
                         )}
 
-                        {financeiroDisponivel && aluno.status === 'ATIVO' && !isQuitada && (
+                        {(
+                          // Allow PROFESSOR to register payment when mensalidade exists and status is PENDENTE or ATRASADA
+                          (isProfessor && aluno.status === 'ATIVO' && mensalidade && (mensalidade.status === 'PENDENTE' || mensalidade.status === 'ATRASADA') && !isQuitada)
+                          || (financeiroDisponivel && aluno.status === 'ATIVO' && !isQuitada)
+                        ) && (
                           <button
                             type="button"
                             id={`btn-expand-pagar-${aluno.id}`}

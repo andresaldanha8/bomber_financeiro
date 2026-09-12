@@ -30,6 +30,17 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   onSuccessConfirmation,
 }) => {
   const { currentUser, isAdmin } = useAuth();
+
+  // Guard explícito para segurança de null: TeacherPaymentsView é tela autenticada,
+  // mas during session restore `currentUser` pode ser null. Retornamos um placeholder
+  // compatível com a UI até a sessão ser restaurada.
+  if (!currentUser) {
+    return (
+      <div className="min-h-[200px] flex items-center justify-center text-zinc-400">
+        <div className="text-sm font-bold">Carregando usuário...</div>
+      </div>
+    );
+  }
   const [activeSubTab, setActiveSubTab] = useState<'REPASSES' | 'ADIANTAMENTOS'>('REPASSES');
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [confirmingAdvanceId, setConfirmingAdvanceId] = useState<string | null>(null);

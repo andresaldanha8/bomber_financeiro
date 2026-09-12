@@ -37,6 +37,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onEditStudent,
 }) => {
   const { currentUser } = useAuth();
+  // Guard explícito para segurança de null: esta tela exige sessão, mas durante
+  // restauração `currentUser` pode ser null. Retornamos um placeholder até a
+  // sessão ser restaurada para evitar usar currentUser sem checagem.
+  if (!currentUser) {
+    return (
+      <div className="min-h-[200px] flex items-center justify-center text-zinc-400">
+        <div className="text-sm font-bold">Carregando usuário...</div>
+      </div>
+    );
+  }
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<
     'TODOS' | 'ATRASADOS' | 'PROXIMOS_7_DIAS' | 'AGUARDANDO'
