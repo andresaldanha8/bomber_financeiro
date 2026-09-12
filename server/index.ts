@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
 import studentsRoutes from './routes/students.routes';
 import mensalidadesRoutes from './routes/mensalidades.routes';
+import pagamentosRoutes from './routes/pagamentos.routes';
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin/users', usersRoutes);
 app.use('/api/students', studentsRoutes);
 app.use('/api', mensalidadesRoutes);
+app.use('/api', pagamentosRoutes);
 
 app.listen(PORT, () => {
   console.log(`Bomber Financeiro API rodando em http://localhost:${PORT}`);
