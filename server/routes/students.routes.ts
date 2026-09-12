@@ -1,6 +1,8 @@
 import { Router } from 'express';
 
 import { prisma } from '../lib/prisma';
+import { executarTransacaoComRetry } from '../services/transactionRetry';
+import { abrirPeriodoAtivoInicial, criarMensalidadeInicial } from '../services/mensalidades.service';
 
 import {
   AuthenticatedRequest,
@@ -158,23 +160,28 @@ router.post('/', async (req: AuthenticatedRequest, res) => {
       });
     }
 
-    const student = await prisma.student.create({
-      data: {
-        name,
-        phone,
-        notes,
-        entryCondition,
-        dueDay,
-        entryDate,
-        status: 'ATIVO',
-        createdById: req.authUser.id,
-      },
-      select: studentSelect,
+    const student = await executarTransacaoComRetry(prisma, async (tx) => {
+      const created = await tx.student.create({
+        data: {
+          name,
+          phone,
+          notes,
+          entryCondition,
+          dueDay,
+          entryDate,
+          status: 'ATIVO',
+          createdById: req.authUser!.id,
+        },
+      });
+
+      // abrir período inicial e criar mensalidade inicial na mesma transação
+      await abrirPeriodoAtivoInicial(tx, { id: created.id }, { id: req.authUser!.id });
+      await criarMensalidadeInicial(tx, { id: created.id }, { id: req.authUser!.id });
+
+      return tx.student.findUnique({ where: { id: created.id }, select: studentSelect });
     });
 
-    return res.status(201).json({
-      student,
-    });
+    return res.status(201).json({ student });
   } catch (error) {
     console.error('Erro ao cadastrar aluno:', error);
 
