@@ -124,7 +124,7 @@ export const DesktopNav: React.FC<DesktopNavProps> = ({
                 }`}
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>Professores & Auditoria</span>
+                <span>Equipe</span>
               </button>
             </>
           )}

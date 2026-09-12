@@ -14,8 +14,11 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { currentUser, users } = useAuth();
-  const professores = users.filter((u) => u.role === 'PROFESSOR');
+  const { currentUser } = useAuth();
+
+  const professores = financeService
+    .getUsers()
+    .filter((u) => u.role === 'PROFESSOR');
 
   const [professorId, setProfessorId] = useState(professores[0]?.id || '');
   const [competencia, setCompetencia] = useState('Agosto/2026');
@@ -31,6 +34,12 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!currentUser) {
+      setErrorMsg('Sessão não autenticada.');
+      return;
+    }
+
     if (!professorId) {
       setErrorMsg('Selecione um professor.');
       return;
@@ -77,7 +86,7 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 bg-black/40 text-white">
           <div className="flex items-center gap-2">
             <DollarSign className="w-5 h-5 text-lime-400" />
-            <h2 className="text-base font-black text-white tracking-tight">Pagar Professor</h2>
+            <h2 className="text-base font-black text-white tracking-tight">Registrar Repasse</h2>
           </div>
           <button
             id="btn-close-teacher-payment-modal"
@@ -217,7 +226,7 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
               disabled={loading}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-sm shadow-lg shadow-lime-500/20 transition-all active:scale-98 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:opacity-50"
             >
-              {loading ? 'Processando...' : 'Lançar Pagamento do Professor'}
+              {loading ? 'Processando...' : 'Registrar Repasse'}
             </button>
           </div>
         </form>

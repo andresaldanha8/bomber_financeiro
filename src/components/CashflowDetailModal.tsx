@@ -284,7 +284,7 @@ export const CashflowDetailModal: React.FC<CashflowDetailModalProps> = ({
                     Confirmado por
                   </span>
                   <span className="text-zinc-300">
-                    {detalhes.confirmadoPorNome || 'Carlos Ferreira (ADMIN)'}
+                    {detalhes.confirmadoPorNome || 'Administrador não informado'}
                   </span>
                 </div>
 
@@ -383,7 +383,7 @@ export const CashflowDetailModal: React.FC<CashflowDetailModalProps> = ({
                     Registrado por
                   </span>
                   <span className="text-zinc-300">
-                    {detalhes.criadoPorDespesa || 'Carlos Ferreira (ADMIN)'}
+                    {detalhes.criadoPorDespesa || 'Administrador não informado'}
                   </span>
                 </div>
 
@@ -480,7 +480,7 @@ export const CashflowDetailModal: React.FC<CashflowDetailModalProps> = ({
                     Registrado por
                   </span>
                   <span className="text-zinc-300">
-                    {detalhes.registradoPorProfessor || 'Carlos Ferreira (ADMIN)'}
+                    {detalhes.registradoPorProfessor || 'Administrador não informado'}
                   </span>
                 </div>
 
@@ -573,7 +573,7 @@ export const CashflowDetailModal: React.FC<CashflowDetailModalProps> = ({
                     Registrado por
                   </span>
                   <span className="text-zinc-300">
-                    {detalhes.registradoPorProfessor || 'Carlos Ferreira (ADMIN)'}
+                    {detalhes.registradoPorProfessor || 'Administrador não informado'}
                   </span>
                 </div>
 

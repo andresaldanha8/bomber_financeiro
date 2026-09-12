@@ -415,7 +415,7 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
         despesa={selectedDespesa}
         initialMode={expenseModalInitialMode}
         onClose={() => setSelectedDespesa(null)}
-        onExpensePaid={(despAtualizada) => {
+        onExpenseUpdated={(despAtualizada) => {
           setLocalRefresh((p) => p + 1);
           if (onExpensePaid) {
             onExpensePaid(despAtualizada);

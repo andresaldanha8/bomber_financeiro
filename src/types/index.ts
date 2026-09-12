@@ -3,8 +3,10 @@ export type UserRole = 'ADMIN' | 'PROFESSOR';
 export interface User {
   id: string;
   name: string;
-  email: string;
+  username?: string;
+  email?: string;
   role: UserRole;
+  active?: boolean;
   avatar?: string;
   chavePix?: string;
   especialidade?: string;

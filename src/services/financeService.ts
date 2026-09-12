@@ -96,6 +96,13 @@ export function cleanProfDuplication(text?: string): string {
   return cleaned;
 }
 
+// Origens legadas: substituir somente nomes, preservando os registros.
+function migrarNomesProfessores(texto: string): string {
+  return texto
+    .replace(/(?:(?:Profa?\.\s*)+)?(?:Kawan Silva|Gabriel Santos)\b/g, 'Prof. Kawan Duarte')
+    .replace(/(?:(?:Profa?\.\s*)+)?(?:Ryan Medeiros|Juliana Ribeiro)\b/g, 'Prof. Ryan Duarte');
+}
+
 // Helper de acesso ao LocalStorage com seed padrão
 function getStoredItem<T>(key: string, defaultVal: T): T {
   try {
@@ -332,30 +339,28 @@ class FinanceService {
   // Usuários e Planos
   public getUsers(): User[] {
     const list = getStoredItem<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
-    let modified = false;
+    // Remove somente do cadastro atual; os registros históricos mantêm seus vínculos.
+    const currentUsers = list.filter((user) => user.id !== 'usr-prof-1');
+    let modified = currentUsers.length !== list.length;
 
-    const migrated = list.map((user) => {
+    const migrated = currentUsers.map((user) => {
       if (user.id === 'usr-prof-2') {
-        if (user.name !== 'Prof. Kawan Silva' || user.avatar !== 'KS') {
+        if (user.name !== 'Prof. Kawan Duarte' || user.avatar !== 'KD') {
           modified = true;
           return {
             ...user,
-            name: 'Prof. Kawan Silva',
-            email: 'kawan@bomber.com.br',
-            avatar: 'KS',
-            chavePix: 'kawan.silva@pix.com.br',
+            name: 'Prof. Kawan Duarte',
+            avatar: 'KD',
           };
         }
       }
       if (user.id === 'usr-prof-3') {
-        if (user.name !== 'Prof. Ryan Medeiros' || user.avatar !== 'RM') {
+        if (user.name !== 'Prof. Ryan Duarte' || user.avatar !== 'RD') {
           modified = true;
           return {
             ...user,
-            name: 'Prof. Ryan Medeiros',
-            email: 'ryan@bomber.com.br',
-            avatar: 'RM',
-            chavePix: 'ryan.medeiros@pix.com.br',
+            name: 'Prof. Ryan Duarte',
+            avatar: 'RD',
           };
         }
       }
@@ -413,13 +418,13 @@ class FinanceService {
         mod = { ...mod };
         delete mod.grupoPlanoId;
       }
-      if (mod.criadoPorId === 'usr-prof-2' && mod.criadoPorNome !== 'Prof. Kawan Silva') {
+      if (mod.criadoPorId === 'usr-prof-2' && mod.criadoPorNome !== 'Prof. Kawan Duarte') {
         needsUpdate = true;
-        mod = { ...mod, criadoPorNome: 'Prof. Kawan Silva' };
+        mod = { ...mod, criadoPorNome: 'Prof. Kawan Duarte' };
       }
-      if (mod.criadoPorId === 'usr-prof-3' && mod.criadoPorNome !== 'Prof. Ryan Medeiros') {
+      if (mod.criadoPorId === 'usr-prof-3' && mod.criadoPorNome !== 'Prof. Ryan Duarte') {
         needsUpdate = true;
-        mod = { ...mod, criadoPorNome: 'Prof. Ryan Medeiros' };
+        mod = { ...mod, criadoPorNome: 'Prof. Ryan Duarte' };
       }
       return mod;
     });
@@ -1161,13 +1166,13 @@ class FinanceService {
           : '2026-09-05';
         item = { ...item, dataPagamento: fallback };
       }
-      if (item.informadoPorId === 'usr-prof-2' && item.informadoPorNome !== 'Prof. Kawan Silva') {
+      if (item.informadoPorId === 'usr-prof-2' && item.informadoPorNome !== 'Prof. Kawan Duarte') {
         needsUpdate = true;
-        item = { ...item, informadoPorNome: 'Prof. Kawan Silva' };
+        item = { ...item, informadoPorNome: 'Prof. Kawan Duarte' };
       }
-      if (item.informadoPorId === 'usr-prof-3' && item.informadoPorNome !== 'Prof. Ryan Medeiros') {
+      if (item.informadoPorId === 'usr-prof-3' && item.informadoPorNome !== 'Prof. Ryan Duarte') {
         needsUpdate = true;
-        item = { ...item, informadoPorNome: 'Prof. Ryan Medeiros' };
+        item = { ...item, informadoPorNome: 'Prof. Ryan Duarte' };
       }
       return item;
     });
@@ -1240,7 +1245,7 @@ class FinanceService {
         formaPagamento: m.ultimoPagamentoForma || 'PIX',
         status: 'CONFIRMADO',
         informadoPorNome: 'Administração',
-        confirmadoPorNome: 'Carlos Ferreira',
+        confirmadoPorNome: 'Administração',
         isPagamentoInicial: isInicial,
         isAntecipado,
         dataEntrada: aluno?.dataEntrada,
@@ -1488,18 +1493,18 @@ class FinanceService {
 
     let modified = false;
     list = list.map((p) => {
-      if (p.professorId === 'usr-prof-2' && p.professorNome !== 'Prof. Kawan Silva') {
+      if (p.professorId === 'usr-prof-2' && p.professorNome !== 'Prof. Kawan Duarte') {
         modified = true;
         return {
           ...p,
-          professorNome: 'Prof. Kawan Silva',
+          professorNome: 'Prof. Kawan Duarte',
         };
       }
-      if (p.professorId === 'usr-prof-3' && p.professorNome !== 'Prof. Ryan Medeiros') {
+      if (p.professorId === 'usr-prof-3' && p.professorNome !== 'Prof. Ryan Duarte') {
         modified = true;
         return {
           ...p,
-          professorNome: 'Prof. Ryan Medeiros',
+          professorNome: 'Prof. Ryan Duarte',
         };
       }
       return p;
@@ -1633,13 +1638,13 @@ class FinanceService {
 
     let modified = false;
     list = list.map((a) => {
-      if (a.professorId === 'usr-prof-2' && a.professorNome !== 'Prof. Kawan Silva') {
+      if (a.professorId === 'usr-prof-2' && a.professorNome !== 'Prof. Kawan Duarte') {
         modified = true;
-        return { ...a, professorNome: 'Prof. Kawan Silva' };
+        return { ...a, professorNome: 'Prof. Kawan Duarte' };
       }
-      if (a.professorId === 'usr-prof-3' && a.professorNome !== 'Prof. Ryan Medeiros') {
+      if (a.professorId === 'usr-prof-3' && a.professorNome !== 'Prof. Ryan Duarte') {
         modified = true;
-        return { ...a, professorNome: 'Prof. Ryan Medeiros' };
+        return { ...a, professorNome: 'Prof. Ryan Duarte' };
       }
       if (a.professorNome && a.professorNome.startsWith('Prof. Prof.')) {
         modified = true;
@@ -1930,13 +1935,11 @@ class FinanceService {
           registradoPorNome: 'Sistema (Saldo Inicial)',
         };
       }
-      if (m.descricao && (m.descricao.includes('Gabriel Santos') || m.descricao.includes('Juliana Ribeiro'))) {
+      if (m.descricao && migrarNomesProfessores(m.descricao) !== m.descricao) {
         updated = true;
         return {
           ...m,
-          descricao: m.descricao
-            .replace(/Gabriel Santos/g, 'Kawan Silva')
-            .replace(/Juliana Ribeiro/g, 'Ryan Medeiros'),
+          descricao: migrarNomesProfessores(m.descricao),
         };
       }
       return m;
@@ -2124,25 +2127,22 @@ class FinanceService {
       let usuarioNome = log.usuarioNome;
       let detalhes = log.detalhes;
 
-      if (log.usuarioId === 'usr-prof-2' && usuarioNome !== 'Prof. Kawan Silva') {
-        usuarioNome = 'Prof. Kawan Silva';
+      if (log.usuarioId === 'usr-prof-2' && usuarioNome !== 'Prof. Kawan Duarte') {
+        usuarioNome = 'Prof. Kawan Duarte';
         changed = true;
-      } else if (log.usuarioId === 'usr-prof-3' && usuarioNome !== 'Prof. Ryan Medeiros') {
-        usuarioNome = 'Prof. Ryan Medeiros';
+      } else if (log.usuarioId === 'usr-prof-3' && usuarioNome !== 'Prof. Ryan Duarte') {
+        usuarioNome = 'Prof. Ryan Duarte';
         changed = true;
       }
 
       if (
         detalhes &&
-        (detalhes.includes('Gabriel Santos') ||
-          detalhes.includes('Juliana Ribeiro') ||
+        (migrarNomesProfessores(detalhes) !== detalhes ||
           detalhes.includes('Prof. Prof.') ||
           detalhes.includes('Profa. Profa.'))
       ) {
         detalhes = cleanProfDuplication(
-          detalhes
-            .replace(/Gabriel Santos/g, 'Kawan Silva')
-            .replace(/Juliana Ribeiro/g, 'Ryan Medeiros')
+          migrarNomesProfessores(detalhes)
         );
         changed = true;
       }

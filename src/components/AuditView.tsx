@@ -19,6 +19,7 @@ import {
   HandCoins,
 } from 'lucide-react';
 import { TeacherPaymentsView } from './TeacherPaymentsView';
+import { AdminUsersView } from './AdminUsersView';
 import { AdminPayAdvanceModal } from './AdminPayAdvanceModal';
 import { AdminRejectAdvanceModal } from './AdminRejectAdvanceModal';
 import { AdiantamentoProfessor } from '../types';
@@ -27,7 +28,7 @@ interface AuditViewProps {
   onOpenTeacherPaymentModal: () => void;
 }
 
-type SubTabType = 'REPASSES' | 'ADIANTAMENTOS' | 'AUDITORIA';
+type SubTabType = 'REPASSES' | 'ADIANTAMENTOS' | 'USUARIOS' | 'AUDITORIA';
 
 export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal }) => {
   const [subTab, setSubTab] = useState<SubTabType>('REPASSES');
@@ -99,7 +100,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
 
   return (
     <div id="audit-view" key={`audit-view-${refreshTick}`} className="space-y-4 pb-20">
-      {/* Sub-navegação: Repasses | Adiantamentos | Auditoria */}
+      {/* Sub-navegação: Repasses | Adiantamentos | Usuários | Auditoria */}
       <div className="flex gap-1.5 border-b border-white/10 pb-2 overflow-x-auto">
         <button
           type="button"
@@ -147,6 +148,22 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
 
         <button
           type="button"
+          id="btn-sub-usuarios"
+          onClick={() => {
+            setSubTab('USUARIOS');
+            setFeedback(null);
+          }}
+          className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${
+            subTab === 'USUARIOS'
+              ? 'bg-lime-400 text-black shadow-xs'
+              : 'bg-[#18181b] border border-white/10 text-zinc-400 hover:bg-white/5 hover:text-white'
+          }`}
+        >
+          Usuários
+        </button>
+
+        <button
+          type="button"
           id="btn-sub-auditoria"
           onClick={() => {
             setSubTab('AUDITORIA');
@@ -161,6 +178,8 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
           Auditoria
         </button>
       </div>
+
+      {subTab === 'USUARIOS' && <AdminUsersView />}
 
       {/* Banner de Feedback da Ação */}
       {feedback && (
@@ -496,4 +515,3 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
     </div>
   );
 };
-

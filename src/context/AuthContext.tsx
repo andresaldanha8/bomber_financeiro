@@ -1,68 +1,133 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
+
 import { User, UserRole } from '../types';
-import { financeService } from '../services/financeService';
 
 interface AuthContextType {
-  currentUser: User;
-  users: User[];
-  role: UserRole;
+  currentUser: User | null;
+  role: UserRole | null;
   isAdmin: boolean;
   isProfessor: boolean;
-  switchUser: (userId: string) => void;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+
+  login: (
+    username: string,
+    password: string,
+  ) => Promise<{ success: boolean; message?: string }>;
+
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const CURRENT_USER_KEY = 'bomber_active_user_id';
-
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    const allUsers = financeService.getUsers();
-    const savedId = localStorage.getItem(CURRENT_USER_KEY);
-    const found = allUsers.find((u) => u.id === savedId);
-    // Default: Prof. Marcos Andrade ou Admin
-    return found || allUsers[1] || allUsers[0];
-  });
+export const AuthProvider: React.FC<{
+  children: React.ReactNode;
+}> = ({ children }) => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const allUsers = financeService.getUsers();
-    setUsers(allUsers);
-    if (!currentUser && allUsers.length > 0) {
-      setCurrentUser(allUsers[0]);
-    } else if (currentUser) {
-      const currentUpdated = allUsers.find((u) => u.id === currentUser.id);
-      if (
-        currentUpdated &&
-        (currentUpdated.name !== currentUser.name ||
-          currentUpdated.email !== currentUser.email ||
-          currentUpdated.avatar !== currentUser.avatar)
-      ) {
-        setCurrentUser(currentUpdated);
+    const restoreSession = async () => {
+      try {
+        const response = await fetch('/api/auth/me', {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          setCurrentUser(null);
+          return;
+        }
+
+        const data = await response.json();
+
+        setCurrentUser(data.user);
+      } catch (error) {
+        console.error('Erro ao restaurar sessão:', error);
+        setCurrentUser(null);
+      } finally {
+        setIsLoading(false);
       }
-    }
+    };
+
+    restoreSession();
   }, []);
 
-  const switchUser = (userId: string) => {
-    const found = users.find((u) => u.id === userId);
-    if (found) {
-      setCurrentUser(found);
-      localStorage.setItem(CURRENT_USER_KEY, found.id);
+  const login = async (
+    username: string,
+    password: string,
+  ): Promise<{ success: boolean; message?: string }> => {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username,
+          password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          message: data.message || 'Não foi possível realizar o login.',
+        };
+      }
+
+      setCurrentUser(data.user);
+
+      return {
+        success: true,
+      };
+    } catch (error) {
+      console.error('Erro no login:', error);
+
+      return {
+        success: false,
+        message: 'Não foi possível conectar ao servidor.',
+      };
     }
   };
 
-  const isAdmin = currentUser?.role === 'ADMIN';
-  const isProfessor = currentUser?.role === 'PROFESSOR';
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Erro no logout:', error);
+    } finally {
+      setCurrentUser(null);
+    }
+  };
+
+  const role = currentUser?.role ?? null;
+  const isAdmin = role === 'ADMIN';
+  const isProfessor = role === 'PROFESSOR';
+  const isAuthenticated = currentUser !== null;
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
-        users,
-        role: currentUser?.role || 'PROFESSOR',
+        role,
         isAdmin,
         isProfessor,
-        switchUser,
+        isAuthenticated,
+        isLoading,
+        login,
+        logout,
       }}
     >
       {children}
@@ -72,8 +137,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
+
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
+
   return context;
 };

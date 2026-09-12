@@ -1,3 +1,4 @@
+import { LoginScreen } from './components/LoginScreen';
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
@@ -36,7 +37,12 @@ const PROFESSOR_ALLOWED_TABS: TabType[] = [
 ];
 
 function MainContent() {
-  const { currentUser, isAdmin } = useAuth();
+  const {
+    currentUser,
+    isAdmin,
+    isAuthenticated,
+    isLoading,
+} = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('inicio');
   const [caixaSubView, setCaixaSubView] = useState<CaixaSubView>('VISAO_GERAL');
   const [refreshKey, setRefreshKey] = useState(0);
@@ -96,8 +102,22 @@ function MainContent() {
   };
 
   const triggerRefresh = () => {
-    setRefreshKey((k) => k + 1);
-  };
+  setRefreshKey((k) => k + 1);
+};
+
+if (isLoading) {
+  return (
+    <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-zinc-400">
+      <div className="text-sm font-bold animate-pulse">
+        Carregando sessão...
+      </div>
+    </div>
+  );
+}
+
+if (!isAuthenticated || !currentUser) {
+  return <LoginScreen />;
+}
 
   // Contadores de Badges
   const pagamentosAguardando = financeService.getPagamentosAguardandoConfirmacao().length;
