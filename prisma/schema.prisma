@@ -30,6 +30,20 @@ enum StatusMensalidade {
   AGUARDANDO_CONFIRMACAO
 }
 
+enum FormaPagamento {
+  PIX
+  DINHEIRO
+
+  @@map("forma_pagamento")
+}
+
+enum StatusConfirmacaoPagamento {
+  AGUARDANDO
+  CONFIRMADO
+
+  @@map("status_confirmacao_pagamento")
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -45,6 +59,9 @@ model User {
   mensalidadesCreated    Mensalidade[]           @relation("MensalidadeCreatedBy")
   activityPeriodsStarted StudentActivityPeriod[] @relation("StudentActivityStartedBy")
   activityPeriodsEnded   StudentActivityPeriod[] @relation("StudentActivityEndedBy")
+
+  pagamentosRegistrados  PagamentoAluno[] @relation("PagamentoRegistradoPor")
+  pagamentosConfirmados PagamentoAluno[] @relation("PagamentoConfirmadoPor")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -108,6 +125,8 @@ model Mensalidade {
   student   Student @relation("StudentMensalidades", fields: [studentId], references: [id], onDelete: Restrict)
   createdBy User    @relation("MensalidadeCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
+  pagamentos PagamentoAluno[] @relation("MensalidadePagamentos")
+
   // Checks e unicidade parcial da mensalidade inicial estão na migration SQL.
   @@unique([studentId, competencia])
   @@index([status, dataVencimento])
@@ -135,4 +154,29 @@ model StudentActivityPeriod {
   @@index([startedById])
   @@index([endedById])
   @@map("student_activity_periods")
+}
+
+model PagamentoAluno {
+  id                 String   @id @default(cuid())
+  mensalidadeId      String   @map("mensalidade_id")
+  valor              Decimal  @db.Decimal(10,2) @map("valor")
+  formaPagamento     FormaPagamento @map("forma_pagamento")
+  statusConfirmacao  StatusConfirmacaoPagamento @default(AGUARDANDO) @map("status_confirmacao")
+  dataPagamento      DateTime @db.Date @map("data_pagamento")
+  registradoPorId    String   @map("registrado_por_id")
+  confirmadoPorId    String?  @map("confirmado_por_id")
+  confirmadoEm       DateTime? @map("confirmado_em")
+  observacao         String?  @map("observacao")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mensalidade Mensalidade @relation("MensalidadePagamentos", fields: [mensalidadeId], references: [id], onDelete: Restrict)
+  registradoPor User @relation("PagamentoRegistradoPor", fields: [registradoPorId], references: [id], onDelete: Restrict)
+  confirmadoPor  User? @relation("PagamentoConfirmadoPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+
+  @@index([mensalidadeId])
+  @@index([registradoPorId])
+  @@index([confirmadoPorId])
+  @@map("pagamentos_alunos")
 }
