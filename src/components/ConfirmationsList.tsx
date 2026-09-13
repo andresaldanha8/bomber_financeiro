@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { PagamentoAluno } from '../types';
-import {
-  financeService,
-  formatCurrency,
-  formatDateTimeBR,
-} from '../services/financeService';
+import pagamentosApi, { PagamentoApi } from '../services/pagamentosApi';
+import { getMensalidadeById } from '../services/mensalidadesApi';
+import { getStudents } from '../services/studentsApi';
+import { adminUsersService } from '../services/adminUsersService';
+import { formatCurrency } from '../services/financeService';
+import { formatDateTimeBR } from '../services/financeService';
 import {
   CheckCircle2,
   QrCode,
@@ -22,11 +24,153 @@ interface ConfirmationsListProps {
 export const ConfirmationsList: React.FC<ConfirmationsListProps> = ({
   onOpenConfirmModal,
 }) => {
-  const pagamentosPendentes = financeService.getPagamentosAguardandoConfirmacao();
-  const todosPagamentos = financeService.getTodosPagamentosAlunos();
-  const confirmadosRecentes = todosPagamentos
-    .filter((p) => p.statusConfirmacao === 'CONFIRMADO')
-    .slice(0, 10);
+  const [pagamentosPendentes, setPagamentosPendentes] = useState<PagamentoAluno[]>([]);
+  const [confirmadosRecentes, setConfirmadosRecentes] = useState<PagamentoAluno[]>([]);
+  const { currentUser } = useAuth();
+  const formatProfessorPresentation = (name?: string) => {
+    if (!name) return '';
+    let cleaned = name.trim();
+    cleaned = cleaned.replace(/^(?:Prof(?:a)?\.\s*)+/i, (m) => m.replace(/\s+/g, ' '));
+    if (/^Prof(?:a)?\./i.test(cleaned)) return cleaned;
+    return `Prof. ${cleaned}`;
+  };
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        const pagos = await pagamentosApi.getPayments({ statusConfirmacao: 'AGUARDANDO' });
+
+        // fetch mensalidades and students to enrich display data
+        // collect mensalidade ids from pending and also from recent confirmed later
+        const mensalidadeIds = new Set<string>(pagos.map((p) => p.mensalidadeId));
+        const mensalidadeMap: Record<string, any> = {};
+        await Promise.all(
+          Array.from(mensalidadeIds).map(async (id) => {
+            try {
+              const m = await getMensalidadeById(id);
+              mensalidadeMap[id] = m;
+            } catch (e) {
+              // ignore missing mensalidade
+            }
+          })
+        );
+
+        const students = await getStudents();
+        const studentMap: Record<string, any> = {};
+        for (const s of students) studentMap[s.id] = s;
+
+        // fetch professors/admin users once to resolve informadoPor/confirmadoPor names
+        let users: Array<{ id: string; name: string }> = [];
+        try {
+          const usersResp = await adminUsersService.list();
+          users = usersResp.users.map((u: any) => ({ id: u.id, name: u.name }));
+        } catch (e) {
+          // if cannot fetch users, continue with empty list
+          users = [];
+        }
+        const userMap: Record<string, string> = {};
+        for (const u of users) userMap[u.id] = formatProfessorPresentation(u.name);
+
+        const formatCompetencia = (c?: string) => {
+          if (!c) return '—';
+          // Accept formats like '2026-10-01T00:00:00.000Z' or '2026-10' or '2026-10-01'
+          const m = c.match(/(\d{4})-(\d{2})/);
+          if (m) return `${m[2]}/${m[1]}`;
+          // fallback: if already 'MM/YYYY' or similar
+          const alt = c.match(/(\d{2})\/(\d{4})/);
+          if (alt) return `${alt[1]}/${alt[2]}`;
+          return c;
+        };
+
+        // currentUser is read from hook at component top
+
+        const enriched = pagos.map((p) => {
+          const m = mensalidadeMap[p.mensalidadeId];
+          const aluno = m ? studentMap[m.studentId] : undefined;
+          const informadoById = (p as any).informadoPorId || (p as any).registradoPorId || undefined;
+          const informadoNome = p.informadoPorNome || (informadoById && userMap[informadoById]) || undefined;
+
+          const pa: any = {
+            id: p.id,
+            mensalidadeId: p.mensalidadeId,
+            valor: p.valor,
+            formaPagamento: p.formaPagamento,
+            dataPagamento: p.dataPagamento ?? undefined,
+            informadoPorNome: informadoNome ?? (p as any).informadoPorNome ?? undefined,
+            informadoPorId: (p as any).informadoPorId ?? (p as any).registradoPorId ?? undefined,
+            informadoEm: p.informadoEm ?? undefined,
+            observacao: p.observacao ?? undefined,
+            alunoNome: aluno ? aluno.nome : (p as any).alunoNome ?? '—',
+            competencia: formatCompetencia(m ? m.competencia : (p as any).competencia ?? '—'),
+            dataVencimento: m ? m.dataVencimento : undefined,
+            statusConfirmacao: p.statusConfirmacao,
+            // keep raw user ids for later
+          } as PagamentoAluno;
+
+          return pa;
+        });
+
+        if (!active) return;
+        setPagamentosPendentes(enriched);
+
+        // fetch recent confirmed
+        const all = await pagamentosApi.getPayments({ statusConfirmacao: 'CONFIRMADO' });
+
+        // include mensalidade ids from confirmed as well
+        for (const p of all) mensalidadeIds.add(p.mensalidadeId);
+
+        // fetch missing mensalidades in batch (unique)
+        const missingIds = Array.from(mensalidadeIds).filter((id) => !mensalidadeMap[id]);
+        await Promise.all(
+          missingIds.map(async (id) => {
+            try {
+              const m = await getMensalidadeById(id);
+              mensalidadeMap[id] = m;
+            } catch (e) {
+              // ignore
+            }
+          })
+        );
+
+
+
+        const recent = all.slice(0, 10).map((p) => {
+          const m = mensalidadeMap[p.mensalidadeId];
+          const aluno = m ? studentMap[m.studentId] : undefined;
+          const confirmadoPorId = (p as any).confirmadoPorId || (p as any).confirmadoPor;
+          let confirmadoPorName = (p as any).confirmadoPorNome;
+          // prefer current session user when ids match (show raw session name, no Prof. prefix)
+          if (confirmadoPorId && currentUser && confirmadoPorId === currentUser.id) {
+            confirmadoPorName = currentUser.name;
+          } else if (!confirmadoPorName && confirmadoPorId) {
+            // if id maps to a professor from adminUsersService, present normalized professor name
+            if (userMap[confirmadoPorId]) confirmadoPorName = userMap[confirmadoPorId];
+            else confirmadoPorName = undefined;
+          }
+          if (!confirmadoPorName) confirmadoPorName = 'Usuário não disponível';
+
+          const competenciaVal = formatCompetencia(m ? m.competencia : (p as any).competencia ?? '');
+          const alunoNomeVal = aluno ? aluno.nome : (p as any).alunoNome ?? '—';
+          return {
+            id: p.id,
+            alunoNome: alunoNomeVal,
+            competencia: competenciaVal,
+            formaPagamento: p.formaPagamento,
+            confirmadoPorNome: confirmadoPorName,
+            confirmadoEm: (p as any).confirmadoEm,
+            valor: p.valor,
+          } as PagamentoAluno;
+        });
+        setConfirmadosRecentes(recent as any);
+      } catch (err) {
+        console.error('Erro ao carregar fila de confirmações:', err);
+      }
+    })();
+
+    return () => { active = false; };
+  }, []);
 
   return (
     <div id="confirmations-list-view" className="space-y-4 pb-20">
@@ -36,7 +180,7 @@ export const ConfirmationsList: React.FC<ConfirmationsListProps> = ({
           Pagamentos para Confirmar
         </h2>
         <p className="text-xs text-zinc-400">
-          Validação obrigatória do Admin para PIX e Dinheiro antes de lançar no caixa
+          Confirme o recebimento informado pelo professor.
         </p>
       </div>
 
@@ -87,7 +231,7 @@ export const ConfirmationsList: React.FC<ConfirmationsListProps> = ({
                     {pag.alunoNome}
                   </h3>
                   <p className="text-xs text-zinc-400 mt-0.5">
-                    Informado por <strong className="text-zinc-200">{pag.informadoPorNome}</strong> em {formatDateTimeBR(pag.informadoEm)}
+                    Informado por <strong className="text-zinc-200">{formatProfessorPresentation(pag.informadoPorNome)}</strong> em {formatDateTimeBR(pag.informadoEm)}
                   </p>
                 </div>
 

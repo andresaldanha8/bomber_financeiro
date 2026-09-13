@@ -6,6 +6,27 @@ export type RegisterPaymentPayload = {
   observacao?: string;
 };
 
+export type PagamentoApi = {
+  id: string;
+  mensalidadeId: string;
+  valor: number | string;
+  formaPagamento: FormaPagamento;
+  dataPagamento?: string | null;
+  informadoPorId?: string | null;
+  informadoPorNome?: string | null;
+  informadoEm?: string | null;
+  observacao?: string | null;
+  statusConfirmacao?: 'AGUARDANDO' | 'CONFIRMADO' | 'ESTORNADO';
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type GetPaymentsFilters = {
+  mensalidadeId?: string;
+  statusConfirmacao?: 'AGUARDANDO' | 'CONFIRMADO';
+  formaPagamento?: FormaPagamento;
+};
+
 async function handleResponse(res: Response) {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -28,4 +49,37 @@ export async function registerStudentPayment(mensalidadeId: string, payload: Reg
   return handleResponse(res);
 }
 
-export default { registerStudentPayment };
+export async function getPayments(filters?: GetPaymentsFilters): Promise<PagamentoApi[]> {
+  const params = new URLSearchParams();
+  if (filters?.mensalidadeId) params.set('mensalidadeId', filters.mensalidadeId);
+  if (filters?.statusConfirmacao) params.set('statusConfirmacao', filters.statusConfirmacao);
+  if (filters?.formaPagamento) params.set('formaPagamento', filters.formaPagamento);
+
+  const url = `/api/pagamentos${params.toString() ? `?${params.toString()}` : ''}`;
+  const res = await fetch(url, { method: 'GET', credentials: 'include' });
+  const data = await handleResponse(res);
+  return data.pagamentos as PagamentoApi[];
+}
+
+export async function getPaymentById(id: string): Promise<PagamentoApi> {
+  const res = await fetch(`/api/pagamentos/${encodeURIComponent(id)}`, { method: 'GET', credentials: 'include' });
+  const data = await handleResponse(res);
+  return data.pagamento as PagamentoApi;
+}
+
+export async function confirmPayment(pagamentoId: string) {
+  const res = await fetch(`/api/pagamentos/${encodeURIComponent(pagamentoId)}/confirmar`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  return handleResponse(res);
+}
+
+const pagamentosApi = {
+  registerStudentPayment,
+  getPayments,
+  getPaymentById,
+  confirmPayment,
+};
+
+export default pagamentosApi;

@@ -335,8 +335,8 @@ if (!isAuthenticated || !currentUser) {
           if (acao === 'CONFIRMADO') {
             addToast(
               'success',
-              'Pagamento Confirmado pelo Admin!',
-              'Mensalidade quitada, entrada gerada no Caixa e próximo ciclo ativado.'
+              'Pagamento confirmado com sucesso.',
+              'Mensalidade quitada e próximo ciclo atualizado.'
             );
           } else {
             addToast(

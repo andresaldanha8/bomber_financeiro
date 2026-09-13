@@ -1,12 +1,7 @@
 import React, { useState } from 'react';
 import { PagamentoAluno } from '../types';
 import { useAuth } from '../context/AuthContext';
-import {
-  financeService,
-  formatCurrency,
-  formatDateTimeBR,
-  formatDateBR,
-} from '../services/financeService';
+import pagamentosApi from '../services/pagamentosApi';
 import { X, CheckCircle2, RotateCcw, QrCode, Banknote, AlertTriangle, Calendar, Info } from 'lucide-react';
 
 interface ConfirmPaymentModalProps {
@@ -30,58 +25,70 @@ export const ConfirmPaymentModal: React.FC<ConfirmPaymentModalProps> = ({
 
   if (!isOpen || !pagamento) return null;
 
-  // Resolução robusta do vencimento original:
-  // 1. Fonte primária: localizar a mensalidade associada pela referência pagamento.mensalidadeId
-  // 2. Se já existir dataVencimento no próprio objeto pagamento
-  // 3. Fallback: buscar mensalidade histórica pelo par (alunoId + competência)
-  // 4. Fallback seguro para registros legados: competência + alunoId + diaVencimento do aluno
-  const dataVencimentoOriginal = financeService.resolverDataVencimentoPagamento(pagamento);
+  // Helpers locais (não usar financeService)
+  const formatDateBR = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const parts = dateStr.split('T')[0].split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    return dateStr;
+  };
 
-  const dataPagamentoReal =
-    pagamento.dataPagamento || (pagamento.informadoEm ? pagamento.informadoEm.split('T')[0] : '');
+  const formatDateTimeBR = (iso?: string) => {
+    if (!iso) return '-';
+    const datePart = iso.split('T')[0];
+    const timePart = iso.split('T')[1] ? iso.split('T')[1].slice(0,5) : '';
+    const [y,m,d] = datePart.split('-');
+    return `${d}/${m}/${y} ${timePart}`.trim();
+  };
 
-  // Classificação do momento do pagamento (operacional / visual)
-  // PAGO ANTES: dataPagamento < dataVencimento
-  // PAGO NO DIA: dataPagamento === dataVencimento
-  // PAGO APÓS: dataPagamento > dataVencimento
-  const isAntecipado =
-    !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal < dataVencimentoOriginal;
-  const isNoDia =
-    !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal === dataVencimentoOriginal;
-  const isAposVencimento =
-    !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal > dataVencimentoOriginal;
+  // Normaliza apresentação de prefixo Prof./Profª sem alterar o dado persistido
+  const formatProfessorPresentation = (name?: string) => {
+    if (!name) return '';
+    let cleaned = name.trim();
+    // Remover duplicações como "Prof. Prof. ..."
+    cleaned = cleaned.replace(/^(?:Prof(?:a)?\.\s*)+/i, (m) => m.replace(/\s+/g, ' '));
+    // Se já tem prefixo, devolve como está
+    if (/^Prof(?:a)?\./i.test(cleaned)) return cleaned;
+    // Não forçar prefixo quando o nome já vier completo por outro tipo de usuário
+    return cleaned;
+  };
 
-  const handleConfirmar = () => {
+  const formatCurrency = (val: any) => {
+    const n = typeof val === 'string' ? parseFloat(val) : val;
+    if (Number.isNaN(n)) return String(val);
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n);
+  };
+
+  // dataVencimentoOriginal may be passed via pagamento.dataVencimento, or undefined
+  const dataVencimentoOriginal = (pagamento as any).dataVencimento || pagamento.dataVencimento || '';
+  const dataPagamentoReal = pagamento.dataPagamento || (pagamento.informadoEm ? pagamento.informadoEm.split('T')[0] : '');
+
+  const isAntecipado = !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal < dataVencimentoOriginal;
+  const isNoDia = !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal === dataVencimentoOriginal;
+  const isAposVencimento = !!dataVencimentoOriginal && !!dataPagamentoReal && dataPagamentoReal > dataVencimentoOriginal;
+
+  const handleConfirmar = async () => {
     try {
       setLoading(true);
       setErrorMsg('');
-      financeService.confirmarPagamentoAluno(pagamento.id, currentUser);
+      const res = await pagamentosApi.confirmPayment(pagamento.id);
+      // backend returns { pagamento, mensalidade, proximaMensalidade, message }
       onSuccess('CONFIRMADO');
       onClose();
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao confirmar pagamento.');
+      const status = err?.status;
+      if (status === 401) setErrorMsg('Sessão inválida. Faça login novamente.');
+      else if (status === 403) setErrorMsg('Você não tem permissão para confirmar pagamentos.');
+      else if (status === 404) setErrorMsg('Pagamento não encontrado.');
+      else if (status === 409) setErrorMsg(err?.message || 'Conflito ao confirmar pagamento.');
+      else setErrorMsg(err?.message || 'Erro ao confirmar pagamento.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleEstornar = () => {
-    if (!motivoEstorno.trim()) {
-      setErrorMsg('Por favor, descreva o motivo da recusa/estorno.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setErrorMsg('');
-      financeService.estornarPagamentoAluno(pagamento.id, motivoEstorno, currentUser);
-      onSuccess('ESTORNADO');
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao estornar pagamento.');
-    } finally {
-      setLoading(false);
-    }
+    setErrorMsg('Estorno não implementado nesta etapa.');
   };
 
   return (
@@ -147,7 +154,7 @@ export const ConfirmPaymentModal: React.FC<ConfirmPaymentModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs text-zinc-400 font-medium">Registrado por:</span>
               <span className="text-xs font-semibold text-zinc-200">
-                {pagamento.informadoPorNome}
+                {formatProfessorPresentation(pagamento.informadoPorNome)}
               </span>
             </div>
 
@@ -203,7 +210,7 @@ export const ConfirmPaymentModal: React.FC<ConfirmPaymentModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs text-zinc-400 font-medium">Registrado no Sistema em:</span>
               <span className="text-xs text-zinc-300">
-                {formatDateTimeBR(pagamento.informadoEm)}
+                {formatDateTimeBR(pagamento.createdAt || pagamento.informadoEm)}
               </span>
             </div>
 

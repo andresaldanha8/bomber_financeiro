@@ -69,6 +69,7 @@ export interface PagamentoAluno {
   informadoPorId: string;
   informadoPorNome: string;
   informadoEm: string; // ISO string
+  createdAt?: string;
   statusConfirmacao: StatusConfirmacaoPagamento;
   confirmadoPorId?: string;
   confirmadoPorNome?: string;
