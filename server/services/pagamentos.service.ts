@@ -2,6 +2,29 @@ import { prisma } from '../lib/prisma';
 import { executarTransacaoComRetry } from './transactionRetry';
 import { normalizarDataCivil } from '../domain/financeDates';
 import * as mensalidadesService from './mensalidades.service';
+import type { Prisma } from '../../src/generated/prisma/client';
+
+type PagamentoParaCaixa = {
+  id: string;
+  valor: Prisma.Decimal;
+  dataPagamento: Date;
+};
+
+// Chamado somente após a confirmação real, na transação do pagamento.
+async function criarEntradaPagamento(
+  tx: Prisma.TransactionClient, pagamento: PagamentoParaCaixa, adminId: string,
+) {
+  await tx.movimentoCaixa.create({ data: {
+    tipo: 'ENTRADA',
+    origem: 'PAGAMENTO_ALUNO',
+    valor: pagamento.valor,
+    dataFinanceira: pagamento.dataPagamento,
+    referenciaId: pagamento.id,
+    chaveIdempotencia: `PAGAMENTO_ALUNO:${pagamento.id}`,
+    criadoPorId: adminId,
+    descricao: 'Recebimento de pagamento de aluno',
+  } });
+}
 
 /** Tipos mínimos locais para evitar dependência do client gerado */
 export type FormaPagamento = 'PIX' | 'DINHEIRO';
@@ -53,11 +76,11 @@ export async function confirmarPagamentoPorAdmin(
 ) {
   return executarTransacaoComRetry(prisma, async (tx) => {
     // lock pagamento
-    const pagamentos = (await tx.$queryRaw`
-      SELECT id, mensalidade_id, status_confirmacao FROM pagamentos_alunos WHERE id = ${pagamentoId} FOR UPDATE
-    `) as any[];
+    const pagamentos = await tx.$queryRaw<(PagamentoParaCaixa & { mensalidade_id: string; status_confirmacao: StatusConfirmacao })[]>`
+      SELECT id, mensalidade_id, status_confirmacao, valor, data_pagamento AS "dataPagamento" FROM pagamentos_alunos WHERE id = ${pagamentoId} FOR UPDATE
+    `;
     if (pagamentos.length === 0) throw new Error('Pagamento não encontrado.');
-    const p: any = pagamentos[0];
+    const p = pagamentos[0];
     if (p.status_confirmacao === 'CONFIRMADO') return { ok: true, message: 'Pagamento já confirmado.' };
 
     // lock mensalidade
@@ -93,6 +116,7 @@ export async function confirmarPagamentoPorAdmin(
       }
     }
 
+    await criarEntradaPagamento(tx, p, confirmadoPorId);
     return { ok: true };
   });
 }
@@ -120,10 +144,10 @@ export async function registrarPagamentoAdminDireto(
     if (existing.length > 0) throw new Error('Já existe pagamento em processamento ou confirmado para esta mensalidade.');
 
     const dataPag = normalizarDataCivil(dataPagamento).toISOString().slice(0,10);
-    const createRes = await tx.$queryRaw`
+    const createRes = await tx.$queryRaw<PagamentoParaCaixa[]>`
       INSERT INTO pagamentos_alunos (id, mensalidade_id, valor, forma_pagamento, status_confirmacao, data_pagamento, registrado_por_id, confirmado_por_id, confirmado_em, created_at, updated_at)
       VALUES (gen_random_uuid()::text, ${mensalidadeId}, ${m.valor}, ${formaPagamento}, 'CONFIRMADO', ${dataPag}, ${adminId}, ${adminId}, now(), now(), now())
-      RETURNING id
+      RETURNING id, valor, data_pagamento AS "dataPagamento"
     `;
 
     // quitar mensalidade
@@ -145,6 +169,7 @@ export async function registrarPagamentoAdminDireto(
       }
     }
 
-    return (createRes as any)[0];
+    await criarEntradaPagamento(tx, createRes[0], adminId);
+    return { id: createRes[0].id };
   });
 }
