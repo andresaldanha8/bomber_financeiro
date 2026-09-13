@@ -64,6 +64,28 @@ enum OrigemMovimentoCaixa {
   @@map("origem_movimento_caixa")
 }
 
+enum DespesaStatus {
+  PENDENTE
+  PAGA
+
+  @@map("despesa_status")
+}
+
+enum DespesaCategoria {
+  PROFESSORES  @map("Professores")
+  ENERGIA      @map("Energia")
+  AGUA         @map("Água")
+  INTERNET     @map("Internet")
+  ALUGUEL      @map("Aluguel")
+  MANUTENCAO   @map("Manutenção")
+  EQUIPAMENTOS @map("Equipamentos")
+  PRODUTOS_MATERIAL @map("Produtos/Material")
+  IMPOSTOS_TAXAS    @map("Impostos/Taxas")
+  OUTROS       @map("Outros")
+
+  @@map("despesa_categoria")
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -82,6 +104,8 @@ model User {
 
   pagamentosRegistrados PagamentoAluno[] @relation("PagamentoRegistradoPor")
   pagamentosConfirmados PagamentoAluno[] @relation("PagamentoConfirmadoPor")
+  despesasCriadas        Despesa[]         @relation("DespesaCreatedBy")
+  despesasPagas          Despesa[]         @relation("DespesaPaidBy")
 
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -200,6 +224,35 @@ model PagamentoAluno {
   @@index([registradoPorId])
   @@index([confirmadoPorId])
   @@map("pagamentos_alunos")
+}
+
+model Despesa {
+  id            String           @id @default(cuid())
+  descricao     String
+  categoria     DespesaCategoria
+  valor         Decimal          @db.Decimal(10, 2)
+  dataDespesa   DateTime         @db.Date @map("data_despesa")
+  status        DespesaStatus    @default(PENDENTE)
+
+  criadoPorId   String           @map("criado_por_id")
+  criadoPor     User             @relation("DespesaCreatedBy", fields: [criadoPorId], references: [id], onDelete: Restrict)
+
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  dataPagamento DateTime?        @db.Date @map("data_pagamento")
+  formaPagamento String?         @db.VarChar(100) @map("forma_pagamento")
+
+  pagoPorId     String?          @map("pago_por_id")
+  pagoPor       User?            @relation("DespesaPaidBy", fields: [pagoPorId], references: [id], onDelete: Restrict)
+  pagoEm        DateTime?        @map("pago_em")
+
+  observacao    String?          @map("observacao")
+
+  @@index([status])
+  @@index([dataDespesa])
+  @@index([dataPagamento])
+  @@index([categoria])
+  @@map("despesas")
 }
 
 model MovimentoCaixa {
