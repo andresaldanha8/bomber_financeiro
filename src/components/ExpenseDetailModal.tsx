@@ -14,12 +14,8 @@ import {
   FileText,
 } from 'lucide-react';
 import { Despesa } from '../types';
-import {
-  financeService,
-  formatCurrency,
-  formatDateBR,
-  getTodayDateStr,
-} from '../services/financeService';
+import { formatCurrency, formatDateBR, getTodayDateStr } from '../services/financeService';
+import { registrarPagamentoDespesa } from '../services/despesasApi';
 import { useAuth } from '../context/AuthContext';
 
 interface ExpenseDetailModalProps {
@@ -82,19 +78,19 @@ export const ExpenseDetailModal: React.FC<ExpenseDetailModalProps> = ({
     setErrorMsg(null);
 
     try {
-      const atualizada = financeService.registrarPagamentoDespesa(
-        {
-          despesaId: despesa.id,
-          dataPagamento,
-          formaPagamento,
-          observacao: observacao.trim() ? observacao.trim() : undefined,
-        },
-        currentUser
-      );
+      const res = await registrarPagamentoDespesa(despesa.id, {
+        dataPagamento,
+        formaPagamento,
+        observacao: observacao.trim() ? observacao.trim() : undefined,
+      });
 
-      if (onExpenseUpdated) {
-        onExpenseUpdated(atualizada);
+      const despesaAtualizada = (res as any)?.despesa ?? null;
+
+      if (onExpenseUpdated && despesaAtualizada) {
+        onExpenseUpdated(despesaAtualizada as Despesa);
       }
+
+      setLoading(false);
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Erro ao registrar pagamento da despesa.');
