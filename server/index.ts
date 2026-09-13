@@ -9,6 +9,7 @@ import studentsRoutes from './routes/students.routes';
 import mensalidadesRoutes from './routes/mensalidades.routes';
 import pagamentosRoutes from './routes/pagamentos.routes';
 import caixaRoutes from './routes/caixa.routes';
+import despesasRoutes from './routes/despesas.routes';
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/students', studentsRoutes);
 app.use('/api', mensalidadesRoutes);
 app.use('/api', pagamentosRoutes);
 app.use('/api/caixa', caixaRoutes);
+app.use('/api/despesas', despesasRoutes);
 
 app.listen(PORT, () => {
   console.log(`Bomber Financeiro API rodando em http://localhost:${PORT}`);
