@@ -22,6 +22,27 @@ export function isValidCategoria(c: unknown) {
   return typeof c === 'string' && VALID_CATEGORIES.includes(c);
 }
 
+// Helper local: cria um movimento de CAIXA do tipo SAIDA para a despesa dentro
+// da transação `tx`. Recebe campos já persistidos/normalizados da despesa.
+export async function criarSaidaDespesa(
+  tx: Prisma.TransactionClient,
+  despesa: { id: string; valor: Prisma.Decimal; dataDespesa: Date; dataPagamento: Date | null; categoria: string; descricao: string },
+  dataFinanceira: Date,
+  adminId: string,
+) {
+  await tx.movimentoCaixa.create({ data: {
+    tipo: 'SAIDA',
+    origem: 'DESPESA',
+    valor: despesa.valor,
+    dataFinanceira,
+    referenciaId: despesa.id,
+    chaveIdempotencia: `DESPESA:${despesa.id}:PAGAMENTO`,
+    criadoPorId: adminId,
+    descricao: `${despesa.categoria} - ${despesa.descricao}`,
+    observacao: null,
+  } });
+}
+
 export type DespesaCreateInput = {
   descricao: string;
   categoria: string;
@@ -182,6 +203,11 @@ export async function registrarPagamentoDespesa(despesaId: string, dataPagamento
     `;
 
     const updated = await tx.despesa.findUnique({ where: { id: despesaId }, include: { criadoPor: { select: { id: true, name: true } }, pagoPor: { select: { id: true, name: true } } } });
+
+    // criar MovimentoCaixa SAIDA referenciando a despesa, dentro da mesma transação
+    if (updated) {
+      await criarSaidaDespesa(tx, updated as any, dataPag, adminId);
+    }
 
     return {
       id: updated!.id,
