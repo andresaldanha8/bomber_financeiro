@@ -44,6 +44,26 @@ enum StatusConfirmacaoPagamento {
   @@map("status_confirmacao_pagamento")
 }
 
+enum TipoMovimentoCaixa {
+  SALDO_INICIAL
+  ENTRADA
+  SAIDA
+
+  @@map("tipo_movimento_caixa")
+}
+
+enum OrigemMovimentoCaixa {
+  SALDO_INICIAL
+  PAGAMENTO_ALUNO
+  DESPESA
+  REPASSE_PROFESSOR
+  ADIANTAMENTO_PROFESSOR
+  ESTORNO
+  AJUSTE
+
+  @@map("origem_movimento_caixa")
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -60,11 +80,12 @@ model User {
   activityPeriodsStarted StudentActivityPeriod[] @relation("StudentActivityStartedBy")
   activityPeriodsEnded   StudentActivityPeriod[] @relation("StudentActivityEndedBy")
 
-  pagamentosRegistrados  PagamentoAluno[] @relation("PagamentoRegistradoPor")
+  pagamentosRegistrados PagamentoAluno[] @relation("PagamentoRegistradoPor")
   pagamentosConfirmados PagamentoAluno[] @relation("PagamentoConfirmadoPor")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  movimentoCaixas MovimentoCaixa[]
 
   @@map("users")
 }
@@ -157,26 +178,46 @@ model StudentActivityPeriod {
 }
 
 model PagamentoAluno {
-  id                 String   @id @default(cuid())
-  mensalidadeId      String   @map("mensalidade_id")
-  valor              Decimal  @db.Decimal(10,2) @map("valor")
-  formaPagamento     FormaPagamento @map("forma_pagamento")
-  statusConfirmacao  StatusConfirmacaoPagamento @default(AGUARDANDO) @map("status_confirmacao")
-  dataPagamento      DateTime @db.Date @map("data_pagamento")
-  registradoPorId    String   @map("registrado_por_id")
-  confirmadoPorId    String?  @map("confirmado_por_id")
-  confirmadoEm       DateTime? @map("confirmado_em")
-  observacao         String?  @map("observacao")
+  id                String                     @id @default(cuid())
+  mensalidadeId     String                     @map("mensalidade_id")
+  valor             Decimal                    @map("valor") @db.Decimal(10, 2)
+  formaPagamento    FormaPagamento             @map("forma_pagamento")
+  statusConfirmacao StatusConfirmacaoPagamento @default(AGUARDANDO) @map("status_confirmacao")
+  dataPagamento     DateTime                   @map("data_pagamento") @db.Date
+  registradoPorId   String                     @map("registrado_por_id")
+  confirmadoPorId   String?                    @map("confirmado_por_id")
+  confirmadoEm      DateTime?                  @map("confirmado_em")
+  observacao        String?                    @map("observacao")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  mensalidade Mensalidade @relation("MensalidadePagamentos", fields: [mensalidadeId], references: [id], onDelete: Restrict)
-  registradoPor User @relation("PagamentoRegistradoPor", fields: [registradoPorId], references: [id], onDelete: Restrict)
-  confirmadoPor  User? @relation("PagamentoConfirmadoPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
+  mensalidade   Mensalidade @relation("MensalidadePagamentos", fields: [mensalidadeId], references: [id], onDelete: Restrict)
+  registradoPor User        @relation("PagamentoRegistradoPor", fields: [registradoPorId], references: [id], onDelete: Restrict)
+  confirmadoPor User?       @relation("PagamentoConfirmadoPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict)
 
   @@index([mensalidadeId])
   @@index([registradoPorId])
   @@index([confirmadoPorId])
   @@map("pagamentos_alunos")
+}
+
+model MovimentoCaixa {
+  id                String               @id @default(cuid())
+  tipo              TipoMovimentoCaixa   @map("tipo")
+  valor             Decimal              @map("valor") @db.Decimal(10, 2)
+  dataFinanceira    DateTime             @map("data_financeira") @db.Date
+  descricao         String?              @map("descricao")
+  origem            OrigemMovimentoCaixa @map("origem")
+  referenciaId      String?              @map("referencia_id")
+  chaveIdempotencia String               @unique @map("chave_idempotencia") @db.VarChar(255)
+  criadoPorId       String               @map("criado_por_id")
+  criadoPor         User                 @relation(fields: [criadoPorId], references: [id], onDelete: Restrict)
+  observacao        String?              @map("observacao")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  @@index([dataFinanceira])
+  @@index([origem, referenciaId])
+  @@index([tipo, dataFinanceira])
+  @@map("movimentos_caixa")
 }
