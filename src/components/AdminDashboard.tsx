@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   financeService,
   formatCurrency,
-  formatDateTimeBR,
   formatDateBR,
   getFutureDateStr,
+  getTodayDateStr,
 } from '../services/financeService';
 import { PagamentoAluno } from '../types';
+import { CashMovement, CashSummary, getCashMovements, getCashSummary } from '../services/caixaApi';
 import {
   DollarSign,
   TrendingUp,
@@ -45,14 +46,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateTab,
   onOpenExtratoCaixa,
 }) => {
-  const stats = financeService.getDashboardAdminStats();
+  // Somente indicadores de alunos permanecem legados; não consultar movimentos locais.
+  const mensalidades = financeService.getMensalidades();
+  const alunos = financeService.getAlunos();
+  const hoje = getTodayDateStr();
+  const elegiveis = mensalidades.filter((m) => alunos.some((a) => a.id === m.alunoId && a.status === 'ATIVO') && !financeService.isPagamentoInicialPendente(m.alunoId));
+  const stats = {
+    totalAguardandoConfirmacao: mensalidades.filter((m) => m.status === 'AGUARDANDO_CONFIRMACAO').length,
+    totalAtrasados: elegiveis.filter((m) => m.status === 'ATRASADA' || (m.status === 'PENDENTE' && m.dataVencimento < hoje)).length,
+    totalVencemSemana: elegiveis.filter((m) => m.status === 'PENDENTE' && m.dataVencimento >= hoje && m.dataVencimento <= getFutureDateStr(7)).length,
+  };
   const pagamentosPendentes = financeService.getPagamentosAguardandoConfirmacao();
-  const ultimasMovimentacoes = financeService.getMovimentacoesCaixa().slice(0, 5);
+  const [summary, setSummary] = useState<CashSummary | null>(null);
+  const [ultimasMovimentacoes, setUltimasMovimentacoes] = useState<CashMovement[]>([]);
+  const [cashError, setCashError] = useState('');
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setCashError(''); setSummary(null); setUltimasMovimentacoes([]);
+    Promise.all([getCashSummary(), getCashMovements({ limit: 5 })]).then(([resumo, rows]) => {
+      if (active) { setSummary(resumo); setUltimasMovimentacoes(rows); }
+    }).catch((err: unknown) => { if (active) setCashError(err instanceof Error ? err.message : 'Erro ao consultar Caixa.'); });
+    return () => { active = false; };
+  }, [retry]);
 
-  const isResultadoPositivo = stats.resultadoMes >= 0;
+  const isResultadoPositivo = (summary?.resultadoMes ?? 0) >= 0;
 
   return (
     <div id="admin-dashboard-view" className="space-y-4 pb-20">
+      <p className="text-xs text-zinc-400">Caixa oficial: somente movimentos registrados no sistema. Despesas, repasses e adiantamentos do módulo legado não estão incluídos.</p>
+      {cashError && <p role="alert" className="text-sm text-red-400">{cashError} <button type="button" onClick={() => setRetry((value) => value + 1)} className="underline">Tentar novamente</button></p>}
       {/* Bloco 1: Caixa Atual & KPIs Financeiros */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {/* Caixa Atual */}
@@ -67,12 +90,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
             <div className="text-2xl sm:text-3xl font-black tracking-tight text-white mt-2">
-              {formatCurrency(stats.saldoCaixa)}
+              {summary ? formatCurrency(summary.saldoDisponivel) : '—'}
             </div>
           </div>
 
           <div className="pt-3 mt-3 border-t border-white/10 flex items-center justify-between text-xs text-zinc-400">
-            <span>Entradas vs. Saídas operacionais</span>
+            <span>Saldo acumulado do Caixa oficial</span>
             <button
               type="button"
               id="btn-admin-ver-extrato-caixa"
@@ -95,7 +118,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="p-4 rounded-2xl bg-[#18181b] border border-white/10 shadow-xl shadow-black/30 flex flex-col justify-between text-white">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-              Resultado de Setembro/2026
+              Resultado {summary ? formatDateBR(summary.periodoInicio).slice(3) : 'do mês'}
             </span>
             <span
               className={`text-xs font-black px-2 py-0.5 rounded-full ${
@@ -104,12 +127,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   : 'bg-red-500/20 text-red-400 border border-red-500/30'
               }`}
             >
-              {isResultadoPositivo ? 'Superávit' : 'Déficit'}
+              {summary ? (isResultadoPositivo ? 'Superávit' : 'Déficit') : (cashError ? 'Indisponível' : 'Carregando...')}
             </span>
           </div>
 
           <div className="text-2xl font-black text-white mt-1">
-            {formatCurrency(stats.resultadoMes)}
+            {summary ? formatCurrency(summary.resultadoMes) : '—'}
           </div>
 
           {/* Sub-métricas: Entradas vs Saídas */}
@@ -118,7 +141,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <TrendingUp className="w-3.5 h-3.5 shrink-0" />
               <div>
                 <span className="text-[10px] text-zinc-400 block leading-none font-semibold">Entradas</span>
-                <span className="font-bold text-white">{formatCurrency(stats.entradasMes)}</span>
+                <span className="font-bold text-white">{summary ? formatCurrency(summary.entradasMes) : '—'}</span>
               </div>
             </div>
 
@@ -126,7 +149,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <TrendingDown className="w-3.5 h-3.5 shrink-0" />
               <div>
                 <span className="text-[10px] text-zinc-400 block leading-none font-semibold">Saídas</span>
-                <span className="font-bold text-white">{formatCurrency(stats.saidasMes)}</span>
+                <span className="font-bold text-white">{summary ? formatCurrency(summary.saidasMes) : '—'}</span>
               </div>
             </div>
           </div>
@@ -169,7 +192,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div>
               <p className="text-xs font-bold leading-tight">Nova Despesa</p>
-              <p className="text-[11px] text-red-400 font-semibold">+ Lançar saída</p>
+              <p className="text-[11px] text-red-400 font-semibold">Módulo legado</p>
             </div>
           </button>
 
@@ -340,8 +363,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         <div className="space-y-2">
+          {!summary && !cashError && <p role="status" className="text-xs text-zinc-400">Carregando movimentos...</p>}
+          {summary && ultimasMovimentacoes.length === 0 && <p className="text-xs text-zinc-400">Nenhum movimento no Caixa.</p>}
           {ultimasMovimentacoes.map((mov) => {
             const isEntrada = mov.tipo === 'ENTRADA';
+            const isInicial = mov.tipo === 'SALDO_INICIAL';
             return (
               <div
                 key={mov.id}
@@ -351,12 +377,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div
                     className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                      isEntrada
+                      isInicial ? 'bg-zinc-700/30 text-zinc-200 border border-white/20' : isEntrada
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                         : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                     }`}
                   >
-                    {isEntrada ? (
+                    {isInicial ? <Receipt className="w-4 h-4" /> : isEntrada ? (
                       <ArrowUpRight className="w-4 h-4 stroke-[2.5]" />
                     ) : (
                       <ArrowDownRight className="w-4 h-4 stroke-[2.5]" />
@@ -364,20 +390,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-white truncate">
-                      {mov.descricao}
+                      {mov.descricao || mov.origem.replaceAll('_', ' ')}
                     </p>
                     <p className="text-[10px] text-zinc-400">
-                      {formatDateTimeBR(mov.dataHora)} • por {mov.registradoPorNome}
+                      {formatDateBR(mov.dataFinanceira)} • {mov.origem.replaceAll('_', ' ')}{mov.criadoPorNome ? ` • por ${mov.criadoPorNome}` : ''}
                     </p>
                   </div>
                 </div>
 
                 <div
                   className={`text-xs font-black shrink-0 ${
-                    isEntrada ? 'text-emerald-400' : 'text-rose-400'
+                    isInicial ? 'text-zinc-200' : isEntrada ? 'text-emerald-400' : 'text-rose-400'
                   }`}
                 >
-                  {isEntrada ? '+' : '-'} {formatCurrency(mov.valor)}
+                  {isInicial ? '' : isEntrada ? '+' : '-'} {formatCurrency(Number(mov.valor))}
                 </div>
               </div>
             );

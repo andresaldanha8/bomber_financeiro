@@ -226,7 +226,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
                 onChange={(e) => setStatus(e.target.value as StatusDespesa)}
                 className="w-full text-sm px-3 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white"
               >
-                <option value="PAGA" className="bg-[#18181b] text-white">PAGA (Impacta Caixa)</option>
+                <option value="PAGA" className="bg-[#18181b] text-white">PAGA (Registro legado)</option>
                 <option value="PENDENTE" className="bg-[#18181b] text-white">PENDENTE (A Pagar)</option>
               </select>
             </div>
@@ -234,7 +234,7 @@ export const ExpenseModal: React.FC<ExpenseModalProps> = ({
 
           {status === 'PAGA' && (
             <p className="text-[11px] text-zinc-300 bg-white/5 p-3 rounded-2xl border border-white/10">
-              Esta despesa será registrada como <strong className="text-red-400">SAÍDA IMEDIATA</strong> no Caixa da academia.
+              Esta despesa será registrada como <strong className="text-red-400">PAGA</strong> no módulo legado, sem alterar o Caixa oficial.
             </p>
           )}
 

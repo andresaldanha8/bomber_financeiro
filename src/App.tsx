@@ -256,7 +256,7 @@ if (!isAuthenticated || !currentUser) {
               addToast(
                 'success',
                 'Pagamento Registrado!',
-                `Despesa "${desp.descricao}" baixada com sucesso no Caixa.`
+                `Despesa "${desp.descricao}" paga no módulo legado. O Caixa oficial não foi alterado.`
               );
             }}
           />
@@ -357,7 +357,7 @@ if (!isAuthenticated || !currentUser) {
           addToast(
             'success',
             'Despesa Registrada!',
-            `Despesa "${desc}" registrada e contabilizada no caixa.`
+            `Despesa "${desc}" registrada no módulo legado. O Caixa oficial não foi alterado.`
           );
         }}
       />
@@ -371,7 +371,7 @@ if (!isAuthenticated || !currentUser) {
           addToast(
             'success',
             'Repasse Registrado!',
-            `Saída gerada no caixa. Pagamento disponibilizado para ${nomeProf} assinar o recibo.`
+            `Repasse registrado no módulo legado, sem alterar o Caixa oficial. Pagamento disponibilizado para ${nomeProf} assinar o recibo.`
           );
         }}
       />
