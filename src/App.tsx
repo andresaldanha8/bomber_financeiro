@@ -256,7 +256,7 @@ if (!isAuthenticated || !currentUser) {
               addToast(
                 'success',
                 'Pagamento Registrado!',
-                `Despesa "${desp.descricao}" paga no módulo legado. O Caixa oficial não foi alterado.`
+                `Despesa "${desp.descricao}" paga. A saída foi lançada no Caixa.`
               );
             }}
           />
@@ -357,7 +357,7 @@ if (!isAuthenticated || !currentUser) {
           addToast(
             'success',
             'Despesa Registrada!',
-            `Despesa "${desc}" registrada no módulo legado. O Caixa oficial não foi alterado.`
+            `Despesa "${desc}" registrada como pendente. O Caixa será atualizado quando o pagamento for registrado.`
           );
         }}
       />

@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  financeService,
-  formatCurrency,
-  formatDateBR,
-} from '../services/financeService';
+import { formatCurrency, formatDateBR } from '../services/financeService';
+import { listarDespesas } from '../services/despesasApi';
 import {
   Receipt,
   ArrowUpRight,
@@ -15,7 +12,7 @@ import {
 } from 'lucide-react';
 import { CashflowDetailModal } from './CashflowDetailModal';
 import { ExpenseDetailModal } from './ExpenseDetailModal';
-import { Despesa } from '../types';
+import { CategoriaDespesa, Despesa } from '../types';
 import { CashApiError, CashMovement, CashSummary, createInitialBalance, getCashMovements, getCashSummary } from '../services/caixaApi';
 
 const PAGE_SIZE = 50;
@@ -50,7 +47,11 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
   const [selectedMovId, setSelectedMovId] = useState<string | null>(null);
   const [selectedDespesa, setSelectedDespesa] = useState<Despesa | null>(null);
   const [expenseModalInitialMode, setExpenseModalInitialMode] = useState<'DETALHES' | 'PAGAR'>('DETALHES');
-  const [, setLocalRefresh] = useState(0);
+
+  // Despesas (migradas para PostgreSQL)
+  const [despesas, setDespesas] = useState<Despesa[]>([]);
+  const [loadingDespesas, setLoadingDespesas] = useState(false);
+  const [erroDespesas, setErroDespesas] = useState('');
 
   const [summary, setSummary] = useState<CashSummary | null>(null);
   const [summaryError, setSummaryError] = useState('');
@@ -108,6 +109,13 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
     return () => { ++listGeneration.current; };
   }, [filtroTipo, reload]);
 
+  // Efetua a leitura de despesas quando entramos na subtela DESPESAS ou quando o filtro muda
+  useEffect(() => {
+    if (activeSubView !== 'DESPESAS') return;
+    carregarDespesas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSubView, filtroCategoriaDespesa]);
+
   const loadMore = async () => {
     if (pagePending.current) return;
     const generation = listGeneration.current;
@@ -153,12 +161,39 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
     } finally { setSaving(false); }
   };
 
-  // Despesas permanecem no módulo legado e só são consultadas na sua subtela.
-  const despesas = activeSubView === 'DESPESAS' ? financeService.getDespesas(filtroCategoriaDespesa) : [];
+  // carregarDespesas: usa listarDespesas da API PostgreSQL
+  const carregarDespesas = async () => {
+    setLoadingDespesas(true);
+    setErroDespesas('');
+    try {
+      const res = await listarDespesas({
+        categoria: filtroCategoriaDespesa === 'TODAS' ? undefined : filtroCategoriaDespesa,
+      });
+      // Normaliza campos opcionais (null -> undefined) e garante strings para campos exigidos
+      setDespesas(
+        res.map((item) => ({
+          ...item,
+          categoria: item.categoria as CategoriaDespesa,
+          criadoPorNome: item.criadoPorNome ?? '',
+          formaPagamento: (item as any).formaPagamento ?? '',
+          dataPagamento: item.dataPagamento ?? undefined,
+          pagoPorId: item.pagoPorId ?? undefined,
+          pagoPorNome: item.pagoPorNome ?? undefined,
+          pagoEm: item.pagoEm ?? undefined,
+          observacao: item.observacao ?? undefined,
+        }))
+      );
+    } catch (err: any) {
+      setErroDespesas(err?.message || 'Erro ao carregar despesas.');
+      setDespesas([]);
+    } finally {
+      setLoadingDespesas(false);
+    }
+  };
 
   return (
     <div id="cashflow-view" className="space-y-4 pb-20">
-      {activeSubView !== 'DESPESAS' && <p className="text-xs text-zinc-400">Caixa oficial: movimentos registrados no sistema. Despesas, repasses e adiantamentos do módulo legado não compõem estes valores.</p>}
+      {activeSubView !== 'DESPESAS' && <p className="text-xs text-zinc-400">Caixa oficial: movimentos registrados no sistema. Repasses e adiantamentos ainda não integrados não compõem estes valores.</p>}
       {activeSubView !== 'DESPESAS' && summaryError && <div role="alert" className="text-sm text-red-400">{summaryError} <button type="button" onClick={() => setReload((value) => value + 1)} className="underline">Tentar novamente</button></div>}
       {/* 1. VISÃO GERAL DO CAIXA (PÁGINA-MÃE) */}
       {activeSubView === 'VISAO_GERAL' && (
@@ -280,7 +315,7 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
                       Gestão de Despesas
                     </h4>
                     <p className="text-xs text-zinc-400 truncate">
-                      Gestão de despesas no módulo legado
+                      Cadastro e pagamento de despesas
                     </p>
                   </div>
                 </div>
@@ -411,7 +446,7 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
       {/* 3. SUBTELA: Gestão de Despesas */}
       {activeSubView === 'DESPESAS' && (
         <div className="space-y-3.5">
-          <p className="text-xs text-amber-300">Módulo legado: os registros de despesas não alteram o Caixa oficial.</p>
+          <p className="text-xs text-amber-300">As despesas pagas são registradas no Caixa automaticamente.</p>
           {/* Cabeçalho com Ação de Retorno e Nova Despesa */}
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
             <button
@@ -436,86 +471,96 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
           </div>
 
           <div className="space-y-2.5">
-            {despesas.map((desp) => {
-              const isPaga = desp.status === 'PAGA';
-              return (
-                <div
-                  key={desp.id}
-                  id={`card-despesa-${desp.id}`}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setSelectedDespesa(desp);
-                    setExpenseModalInitialMode('DETALHES');
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
+            {loadingDespesas ? (
+              <p role="status" className="p-3 text-xs text-zinc-400">Carregando despesas...</p>
+            ) : erroDespesas ? (
+              <div role="alert" className="p-3 text-xs text-red-400">
+                {erroDespesas} <button type="button" onClick={carregarDespesas} className="underline">Tentar novamente</button>
+              </div>
+            ) : despesas.length === 0 ? (
+              <div className="p-6 text-center text-xs text-zinc-400">Nenhuma despesa encontrada.</div>
+            ) : (
+              despesas.map((desp) => {
+                const isPaga = desp.status === 'PAGA';
+                return (
+                  <div
+                    key={desp.id}
+                    id={`card-despesa-${desp.id}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
                       setSelectedDespesa(desp);
                       setExpenseModalInitialMode('DETALHES');
-                    }
-                  }}
-                  className="p-3.5 rounded-2xl bg-[#18181b] border border-white/10 shadow-md shadow-black/20 flex items-center justify-between gap-2 text-white hover:bg-white/5 hover:border-white/20 transition-all cursor-pointer group active:scale-[0.99]"
-                  title={isPaga ? 'Clique para ver detalhes (Paga)' : 'Clique para ver detalhes ou registrar pagamento'}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
-                        {desp.categoria}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                          isPaga
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
-                        }`}
-                      >
-                        {desp.status}
-                      </span>
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSelectedDespesa(desp);
+                        setExpenseModalInitialMode('DETALHES');
+                      }
+                    }}
+                    className="p-3.5 rounded-2xl bg-[#18181b] border border-white/10 shadow-md shadow-black/20 flex items-center justify-between gap-2 text-white hover:bg-white/5 hover:border-white/20 transition-all cursor-pointer group active:scale-[0.99]"
+                    title={isPaga ? 'Clique para ver detalhes (Paga)' : 'Clique para ver detalhes ou registrar pagamento'}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/10 text-zinc-300">
+                          {desp.categoria}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            isPaga
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-amber-400/20 text-amber-300 border border-amber-400/30'
+                          }`}
+                        >
+                          {desp.status}
+                        </span>
+                      </div>
+
+                      <h4 className="text-xs font-bold text-white mt-1 truncate group-hover:text-lime-400 transition-colors">
+                        {desp.descricao}
+                      </h4>
+
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        {formatDateBR(desp.data)} • via {desp.formaPagamento}
+                      </p>
                     </div>
 
-                    <h4 className="text-xs font-bold text-white mt-1 truncate group-hover:text-lime-400 transition-colors">
-                      {desp.descricao}
-                    </h4>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <span className="text-sm font-black text-red-400 block">
+                          {formatCurrency(desp.valor)}
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          por {desp.criadoPorNome}
+                        </span>
+                        {!isPaga && (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              id={`btn-quick-pagar-${desp.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDespesa(desp);
+                                setExpenseModalInitialMode('PAGAR');
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-[10px] shadow-xs shadow-lime-500/20 transition-all flex items-center gap-1"
+                              title="Registrar pagamento desta despesa"
+                            >
+                              <span>Registrar Pgto.</span>
+                              <ArrowUpRight className="w-3 h-3 stroke-[2.5]" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
-                    <p className="text-[10px] text-zinc-400 mt-0.5">
-                      {formatDateBR(desp.data)} • via {desp.formaPagamento}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="text-right">
-                      <span className="text-sm font-black text-red-400 block">
-                        {formatCurrency(desp.valor)}
-                      </span>
-                      <span className="text-[10px] text-zinc-500">
-                        por {desp.criadoPorNome}
-                      </span>
-                      {!isPaga && (
-                        <div className="mt-1">
-                          <button
-                            type="button"
-                            id={`btn-quick-pagar-${desp.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedDespesa(desp);
-                              setExpenseModalInitialMode('PAGAR');
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-[10px] shadow-xs shadow-lime-500/20 transition-all flex items-center gap-1"
-                            title="Registrar pagamento desta despesa"
-                          >
-                            <span>Registrar Pgto.</span>
-                            <ArrowUpRight className="w-3 h-3 stroke-[2.5]" />
-                          </button>
-                        </div>
-                      )}
+                      <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 transition-colors shrink-0" />
                     </div>
-
-                    <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 transition-colors shrink-0" />
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -533,10 +578,14 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
         despesa={selectedDespesa}
         initialMode={expenseModalInitialMode}
         onClose={() => setSelectedDespesa(null)}
-        onExpenseUpdated={(despAtualizada) => {
-          setLocalRefresh((p) => p + 1);
-          if (onExpensePaid) {
-            onExpensePaid(despAtualizada);
+        onExpenseUpdated={async (despAtualizada) => {
+          try {
+            await carregarDespesas();
+          } finally {
+            setReload((r) => r + 1);
+            if (onExpensePaid) {
+              onExpensePaid(despAtualizada);
+            }
           }
         }}
       />

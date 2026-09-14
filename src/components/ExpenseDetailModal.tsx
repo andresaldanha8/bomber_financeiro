@@ -305,11 +305,11 @@ export const ExpenseDetailModal: React.FC<ExpenseDetailModalProps> = ({
               {/* Mensagem de Contexto */}
               {isPendente ? (
                 <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
-                  <strong className="font-bold">Obrigação Pendente:</strong> Esta despesa ainda não foi paga. Seu pagamento será registrado somente no módulo legado, sem alterar o Caixa oficial.
+                  <strong className="font-bold">Obrigação Pendente:</strong> Esta despesa ainda não foi paga. Ao registrar o pagamento, uma saída será lançada no Caixa.
                 </div>
               ) : (
                 <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 leading-relaxed">
-                  <strong className="font-bold">Despesa Quitada:</strong> O pagamento foi registrado no módulo legado, sem alterar o Caixa oficial. Registro disponível em modo somente leitura.
+                  <strong className="font-bold">Despesa Quitada:</strong> O pagamento foi registrado e lançado no Caixa. Registro disponível em modo somente leitura.
                 </div>
               )}
             </div>
@@ -359,7 +359,7 @@ export const ExpenseDetailModal: React.FC<ExpenseDetailModalProps> = ({
                   className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white"
                 />
                 <p className="text-[11px] text-zinc-400 mt-1">
-                  Data efetiva do pagamento da despesa no módulo legado.
+                  Data efetiva do pagamento da despesa.
                 </p>
               </div>
 
@@ -405,7 +405,7 @@ export const ExpenseDetailModal: React.FC<ExpenseDetailModalProps> = ({
               </div>
 
               <div className="p-3 rounded-2xl bg-white/5 border border-white/10 text-xs text-zinc-300">
-                Ao confirmar, a despesa passará para <strong className="text-emerald-400 font-bold">PAGA</strong>, no valor de <strong className="text-red-400 font-bold">{formatCurrency(despesa.valor)}</strong>, somente no módulo legado. O Caixa oficial não será alterado.
+                Ao confirmar, a despesa passará para <strong className="text-emerald-400 font-bold">PAGA</strong>, no valor de <strong className="text-red-400 font-bold">{formatCurrency(despesa.valor)}</strong>. Uma saída será registrada no Caixa.
               </div>
 
               {/* Botões do Formulário */}
@@ -426,7 +426,7 @@ export const ExpenseDetailModal: React.FC<ExpenseDetailModalProps> = ({
                   className="flex-[2] py-3 px-4 rounded-xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-xs shadow-lg shadow-lime-500/20 transition-all active:scale-98 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loading ? (
-                    'Registrando pagamento no módulo legado...'
+                    'Registrando pagamento...'
                   ) : (
                     <>
                       <CheckCircle className="w-4 h-4 stroke-[2.5]" />

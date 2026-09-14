@@ -74,7 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div id="admin-dashboard-view" className="space-y-4 pb-20">
-      <p className="text-xs text-zinc-400">Caixa oficial: somente movimentos registrados no sistema. Despesas, repasses e adiantamentos do módulo legado não estão incluídos.</p>
+      <p className="text-xs text-zinc-400">Caixa oficial: somente movimentos registrados no sistema. Repasses e adiantamentos ainda não integrados não estão incluídos.</p>
       {cashError && <p role="alert" className="text-sm text-red-400">{cashError} <button type="button" onClick={() => setRetry((value) => value + 1)} className="underline">Tentar novamente</button></p>}
       {/* Bloco 1: Caixa Atual & KPIs Financeiros */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -192,7 +192,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
             <div>
               <p className="text-xs font-bold leading-tight">Nova Despesa</p>
-              <p className="text-[11px] text-red-400 font-semibold">Módulo legado</p>
+              <p className="text-[11px] text-red-400 font-semibold">Cadastro de despesa</p>
             </div>
           </button>
 
