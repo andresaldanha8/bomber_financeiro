@@ -71,6 +71,13 @@ enum DespesaStatus {
   @@map("despesa_status")
 }
 
+enum RepasseProfessorStatus {
+  AGUARDANDO_RECEBIMENTO
+  RECEBIMENTO_CONFIRMADO
+
+  @@map("repasse_professor_status")
+}
+
 enum DespesaCategoria {
   PROFESSORES  @map("Professores")
   ENERGIA      @map("Energia")
@@ -106,6 +113,10 @@ model User {
   pagamentosConfirmados PagamentoAluno[] @relation("PagamentoConfirmadoPor")
   despesasCriadas        Despesa[]         @relation("DespesaCreatedBy")
   despesasPagas          Despesa[]         @relation("DespesaPaidBy")
+
+  repassesRecebidos   RepasseProfessor[] @relation("RepasseProfessorDestinatario")
+  repassesRegistrados RepasseProfessor[] @relation("RepasseProfessorRegistradoPor")
+  repassesConfirmados RepasseProfessor[] @relation("RepasseProfessorConfirmadoPor")
 
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -253,6 +264,33 @@ model Despesa {
   @@index([dataPagamento])
   @@index([categoria])
   @@map("despesas")
+}
+
+model RepasseProfessor {
+  id              String                 @id @default(cuid())
+  professorId     String                 @map("professor_id")
+  competencia     String                 @db.VarChar(7)
+  valor           Decimal                @db.Decimal(10, 2)
+  dataRepasse     DateTime               @map("data_repasse") @db.Date
+  formaPagamento  String                 @map("forma_pagamento") @db.VarChar(100)
+  status          RepasseProfessorStatus @default(AGUARDANDO_RECEBIMENTO)
+  registradoPorId String                 @map("registrado_por_id")
+  registradoEm    DateTime               @default(now()) @map("registrado_em") @db.Timestamptz(3)
+  confirmadoPorId String?                @map("confirmado_por_id")
+  confirmadoEm    DateTime?              @map("confirmado_em") @db.Timestamptz(3)
+
+  professor     User  @relation("RepasseProfessorDestinatario", fields: [professorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  registradoPor User  @relation("RepasseProfessorRegistradoPor", fields: [registradoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  confirmadoPor User? @relation("RepasseProfessorConfirmadoPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  // CHECKs de valor, competencia, forma e consistencia da confirmacao na migration SQL.
+  @@index([professorId], map: "idx_repasses_professor")
+  @@index([status], map: "idx_repasses_status")
+  @@index([dataRepasse], map: "idx_repasses_data_repasse")
+  @@index([competencia], map: "idx_repasses_competencia")
+  @@index([registradoPorId], map: "idx_repasses_registrado_por")
+  @@index([confirmadoPorId], map: "idx_repasses_confirmado_por")
+  @@map("repasses_professores")
 }
 
 model MovimentoCaixa {
