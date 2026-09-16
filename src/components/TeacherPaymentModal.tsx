@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { financeService, formatProfessorNome } from '../services/financeService';
+import { formatProfessorNome, getTodayDateStr } from '../services/financeService';
+import { adminUsersService, type ProfessorAccount } from '../services/adminUsersService';
+import { repassesApi, RepassesApiError, type RepasseFormaPagamento } from '../services/repassesApi';
 import { X, DollarSign, AlertCircle, ShieldCheck } from 'lucide-react';
 
 interface TeacherPaymentModalProps {
@@ -16,61 +18,120 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
 }) => {
   const { currentUser } = useAuth();
 
-  const professores = financeService
-    .getUsers()
-    .filter((u) => u.role === 'PROFESSOR');
-
-  const [professorId, setProfessorId] = useState(professores[0]?.id || '');
-  const [competencia, setCompetencia] = useState('Agosto/2026');
+  const [professores, setProfessores] = useState<ProfessorAccount[]>([]);
+  const [professorId, setProfessorId] = useState('');
+  const [competencia, setCompetencia] = useState('');
   const [valor, setValor] = useState('');
-  const [dataPagamento, setDataPagamento] = useState('2026-09-03');
-  const [formaPagamento, setFormaPagamento] = useState('PIX');
+  const [dataRepasse, setDataRepasse] = useState('');
+  const [formaPagamento, setFormaPagamento] = useState<RepasseFormaPagamento>('PIX');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [loadingProfessores, setLoadingProfessores] = useState(true);
+  const [professoresError, setProfessoresError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const submitting = useRef(false);
+  const lifecycle = useRef(0);
+
+  useEffect(() => {
+    ++lifecycle.current;
+    if (isOpen) {
+      const hoje = getTodayDateStr();
+      setCompetencia(hoje.slice(0, 7));
+      setDataRepasse(hoje);
+      setValor('');
+      setFormaPagamento('PIX');
+      setErrorMsg('');
+    }
+    return () => { ++lifecycle.current; };
+  }, [isOpen, currentUser?.id]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const controller = new AbortController();
+    setLoadingProfessores(true);
+    setProfessoresError('');
+    setProfessores([]);
+    if (currentUser?.role !== 'ADMIN') {
+      setProfessorId('');
+      setLoadingProfessores(false);
+      setProfessoresError('Acesso permitido somente ao administrador.');
+      return () => controller.abort();
+    }
+    adminUsersService.list(controller.signal).then(({ users }) => {
+      if (controller.signal.aborted) return;
+      const ativos = users.filter((user) => user.active === true);
+      setProfessores(ativos);
+      setProfessorId((selected) => ativos.some((user) => user.id === selected) ? selected : ativos[0]?.id ?? '');
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setProfessorId('');
+      setProfessoresError(error instanceof Error ? error.message : 'Erro ao carregar professores.');
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingProfessores(false);
+    });
+    return () => controller.abort();
+  }, [isOpen, currentUser?.id, currentUser?.role, retry]);
 
   if (!isOpen) return null;
 
   const profSelecionado = professores.find((p) => p.id === professorId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
 
     if (!currentUser) {
       setErrorMsg('Sessão não autenticada.');
       return;
     }
 
-    if (!professorId) {
+    if (currentUser.role !== 'ADMIN' || loadingProfessores || professoresError || !profSelecionado) {
       setErrorMsg('Selecione um professor.');
       return;
     }
 
-    const valorNum = parseFloat(valor.replace(',', '.'));
-    if (isNaN(valorNum) || valorNum <= 0) {
-      setErrorMsg('Informe um valor de repasse válido.');
+    const valorTexto = valor.trim();
+    const valorNum = Number(valorTexto.replace(',', '.'));
+    if (!/^\d+(?:[.,]\d{1,2})?$/.test(valorTexto) || !Number.isFinite(valorNum) || valorNum <= 0 || valorNum > 99999999.99) {
+      setErrorMsg('Informe um valor positivo de até R$ 99.999.999,99, com no máximo duas casas decimais.');
+      return;
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(competencia)) {
+      setErrorMsg('Informe uma competência válida (YYYY-MM).');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRepasse)) {
+      setErrorMsg('Informe a data do repasse.');
+      return;
+    }
+    if (!['PIX', 'DINHEIRO', 'TRANSFERENCIA'].includes(formaPagamento)) {
+      setErrorMsg('Forma de pagamento inválida.');
       return;
     }
 
+    submitting.current = true;
+    const version = lifecycle.current;
+    let nomeProfessor: string;
     try {
       setLoading(true);
       setErrorMsg('');
-      financeService.cadastrarPagamentoProfessor(
-        {
-          professorId,
-          competencia,
-          valor: valorNum,
-          dataPagamento,
-          formaPagamento,
-        },
-        currentUser
-      );
-      onSuccess(formatProfessorNome(profSelecionado?.name || 'Professor'));
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro ao registrar pagamento de professor.');
+      const repasse = await repassesApi.create({ professorId, competencia, valor: valorNum, dataRepasse, formaPagamento });
+      nomeProfessor = repasse.professorNome;
+    } catch (err: unknown) {
+      if (version === lifecycle.current) {
+        const message = err instanceof Error ? err.message : 'Erro ao registrar repasse.';
+        setErrorMsg(err instanceof RepassesApiError && err.status < 500 ? message
+          : `${message} Não foi possível confirmar o resultado. Verifique se o repasse foi registrado antes de tentar novamente.`);
+      }
+      return;
     } finally {
-      setLoading(false);
+      submitting.current = false;
+      if (version === lifecycle.current) setLoading(false);
     }
+    if (version !== lifecycle.current) return;
+    setValor('');
+    onSuccess(formatProfessorNome(nomeProfessor));
+    onClose();
   };
 
   return (
@@ -90,7 +151,8 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
           </div>
           <button
             id="btn-close-teacher-payment-modal"
-            onClick={onClose}
+            onClick={() => { if (!submitting.current) onClose(); }}
+            disabled={loading}
             className="w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
             aria-label="Fechar"
           >
@@ -101,11 +163,14 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {errorMsg && (
-            <div className="flex items-center gap-2 p-3 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs">
+            <div role="alert" className="flex items-center gap-2 p-3 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
+          {loadingProfessores && <p role="status" className="text-xs text-zinc-400">Carregando professores...</p>}
+          {professoresError && <div role="alert" className="text-xs text-red-300">{professoresError} <button type="button" disabled={loading} onClick={() => setRetry((value) => value + 1)} className="underline">Tentar novamente</button></div>}
+          {!loadingProfessores && !professoresError && professores.length === 0 && <p role="status" className="text-xs text-zinc-400">Nenhum professor ativo disponível.</p>}
 
           {/* Professor */}
           <div>
@@ -118,6 +183,8 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
             <select
               id="select-professor-repasse"
               value={professorId}
+              disabled={loading || loadingProfessores || !!professoresError || professores.length === 0}
+              required
               onChange={(e) => setProfessorId(e.target.value)}
               className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white font-bold"
             >
@@ -139,10 +206,10 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
                 Competência / Ref. *
               </label>
               <input
-                type="text"
+                type="month"
                 id="input-repasse-competencia"
                 required
-                placeholder="Ex: Agosto/2026"
+                disabled={loading}
                 value={competencia}
                 onChange={(e) => setCompetencia(e.target.value)}
                 className="w-full text-sm px-3 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white"
@@ -159,6 +226,8 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
               <input
                 type="text"
                 id="input-repasse-valor"
+                disabled={loading}
+                inputMode="decimal"
                 required
                 placeholder="0,00"
                 value={valor}
@@ -175,14 +244,15 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
                 htmlFor="input-repasse-data"
                 className="block text-xs font-bold text-zinc-300 mb-1"
               >
-                Data do Pagamento *
+                Data do Repasse *
               </label>
               <input
                 type="date"
                 id="input-repasse-data"
                 required
-                value={dataPagamento}
-                onChange={(e) => setDataPagamento(e.target.value)}
+                disabled={loading}
+                value={dataRepasse}
+                onChange={(e) => setDataRepasse(e.target.value)}
                 className="w-full text-sm px-3 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white"
               />
             </div>
@@ -197,12 +267,13 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
               <select
                 id="select-repasse-forma"
                 value={formaPagamento}
-                onChange={(e) => setFormaPagamento(e.target.value)}
+                disabled={loading}
+                onChange={(e) => setFormaPagamento(e.target.value as RepasseFormaPagamento)}
                 className="w-full text-sm px-3 py-2.5 rounded-xl border border-white/10 bg-[#121212] focus:outline-none focus:ring-2 focus:ring-lime-400 text-white"
               >
                 <option value="PIX" className="bg-[#18181b] text-white">PIX</option>
-                <option value="Dinheiro" className="bg-[#18181b] text-white">Dinheiro</option>
-                <option value="Transferência" className="bg-[#18181b] text-white">Transferência Bancária</option>
+                <option value="DINHEIRO" className="bg-[#18181b] text-white">Dinheiro</option>
+                <option value="TRANSFERENCIA" className="bg-[#18181b] text-white">Transferência Bancária</option>
               </select>
             </div>
           </div>
@@ -223,7 +294,7 @@ export const TeacherPaymentModal: React.FC<TeacherPaymentModalProps> = ({
             <button
               type="submit"
               id="btn-confirmar-repasse-professor"
-              disabled={loading}
+              disabled={loading || loadingProfessores || !!professoresError || !profSelecionado}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-sm shadow-lg shadow-lime-500/20 transition-all active:scale-98 focus:outline-none focus:ring-2 focus:ring-lime-400 disabled:opacity-50"
             >
               {loading ? 'Processando...' : 'Registrar Repasse'}
