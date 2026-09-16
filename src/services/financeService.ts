@@ -2187,10 +2187,9 @@ class FinanceService {
   }
 
   // Dashboard Professor
-  public getDashboardProfessorStats(professorId: string): DashboardProfessorStats {
+  public getDashboardProfessorStats(professorId: string): Omit<DashboardProfessorStats, 'meusPagamentosPendentes'> & { meusAdiantamentosPendentes: number } {
     const mensalidades = this.getMensalidades();
     const alunos = this.getAlunos();
-    const pagamentosProf = this.getPagamentosProfessores(professorId);
 
     const hoje = getTodayDateStr();
     const hojeMais7 = getFutureDateStr(7);
@@ -2223,19 +2222,15 @@ class FinanceService {
       return aluno?.status === 'ATIVO' && m.status === 'AGUARDANDO_CONFIRMACAO';
     }).length;
 
-    // Meus recebimentos pendentes (da academia para o professor: repasses + adiantamentos aguardando confirmação)
-    const meusRepassesPendentes = pagamentosProf.filter(
-      (p) => p.status === 'AGUARDANDO_RECEBIMENTO'
-    ).length;
+    // Adiantamentos continuam legados; repasses são consultados pela API no App.
     const meusAdiantamentosPendentes = this.getMeusAdiantamentosPendentesConfirmacaoCount(professorId);
-    const meusPagamentosPendentes = meusRepassesPendentes + meusAdiantamentosPendentes;
 
     return {
       totalAtrasados,
       totalVencemSemana: totalProximos7Dias,
       totalProximos7Dias,
       totalAguardandoConfirmacao,
-      meusPagamentosPendentes,
+      meusAdiantamentosPendentes,
     };
   }
 

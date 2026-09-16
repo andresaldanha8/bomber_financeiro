@@ -270,12 +270,12 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-base font-black text-white leading-tight tracking-tight">
-                {isAdmin ? 'Repasses e Pagamentos aos Professores' : 'Recebimentos de Repasses'}
+                {isAdmin ? 'Repasses' : 'Recebimentos de Repasses'}
               </h2>
               <p className="text-xs text-zinc-400">
                 {isAdmin
-                  ? 'Controle de pagamentos da academia para a equipe técnica'
-                  : 'Pagamentos que a academia realiza para você (recibos digitais)'}
+                  ? 'Controle de repasses da academia para a equipe técnica'
+                  : 'Repasses registrados para você (recibos digitais)'}
               </p>
             </div>
 
@@ -297,7 +297,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#121214] border border-white/5 text-xs text-zinc-400">
               <ShieldCheck className="w-4 h-4 text-zinc-500 shrink-0" />
               <p className="text-xs text-zinc-300">
-                <span>Somente você visualiza seus recebimentos.</span>{' '}
+                <span>Você visualiza seus próprios repasses. A administração também tem acesso.</span>{' '}
                 <span className="text-zinc-500">Ao confirmar, o recebimento ficará registrado como recibo digital.</span>
               </p>
             </div>

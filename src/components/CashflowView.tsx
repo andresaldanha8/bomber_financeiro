@@ -193,7 +193,7 @@ export const CashflowView: React.FC<CashflowViewProps> = ({
 
   return (
     <div id="cashflow-view" className="space-y-4 pb-20">
-      {activeSubView !== 'DESPESAS' && <p className="text-xs text-zinc-400">Caixa oficial: movimentos registrados no sistema. Repasses e adiantamentos ainda não integrados não compõem estes valores.</p>}
+      {activeSubView !== 'DESPESAS' && <p className="text-xs text-zinc-400">Os repasses registrados neste fluxo compõem o Caixa oficial. Adiantamentos legados não estão incluídos.</p>}
       {activeSubView !== 'DESPESAS' && summaryError && <div role="alert" className="text-sm text-red-400">{summaryError} <button type="button" onClick={() => setReload((value) => value + 1)} className="underline">Tentar novamente</button></div>}
       {/* 1. VISÃO GERAL DO CAIXA (PÁGINA-MÃE) */}
       {activeSubView === 'VISAO_GERAL' && (

@@ -20,6 +20,7 @@ import { MonthlyClosingModal } from './components/MonthlyClosingModal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { Aluno, FormaPagamento, Mensalidade, PagamentoAluno } from './types';
 import { financeService } from './services/financeService';
+import { repassesApi } from './services/repassesApi';
 
 // Abas permitidas por perfil
 const ADMIN_ALLOWED_TABS: TabType[] = [
@@ -46,6 +47,24 @@ function MainContent() {
   const [activeTab, setActiveTab] = useState<TabType>('inicio');
   const [caixaSubView, setCaixaSubView] = useState<CaixaSubView>('VISAO_GERAL');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [badgeRepasses, setBadgeRepasses] = useState<{ userId: string; refresh: number; count: number } | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setBadgeRepasses(null);
+    if (!isLoading && isAuthenticated && currentUser?.role === 'PROFESSOR') {
+      const userId = currentUser.id;
+      repassesApi.listAll({ status: 'AGUARDANDO_RECEBIMENTO' }, controller.signal)
+        .then((rows) => {
+          if (!controller.signal.aborted) setBadgeRepasses({ userId, refresh: refreshKey, count: rows.length });
+        })
+        .catch(() => {
+          // Contagem indisponível: ocultar o badge, sem recorrer ao legado.
+          if (!controller.signal.aborted) setBadgeRepasses(null);
+        });
+    }
+    return () => controller.abort();
+  }, [currentUser?.id, currentUser?.role, isAuthenticated, isLoading, refreshKey]);
 
   // Validação em tempo real: verifica se a aba ativa é permitida para o perfil atual
   const isTabAllowed = isAdmin
@@ -121,10 +140,10 @@ if (!isAuthenticated || !currentUser) {
 
   // Contadores de Badges
   const pagamentosAguardando = financeService.getPagamentosAguardandoConfirmacao().length;
-  const meusPagamentosPendentes = !isAdmin
-    ? financeService
-        .getPagamentosProfessores(currentUser.id)
-        .filter((p) => p.status === 'AGUARDANDO_RECEBIMENTO').length
+  // O zero apenas oculta o badge enquanto a contagem está indisponível.
+  const meusPagamentosPendentes = currentUser.role === 'PROFESSOR' &&
+    badgeRepasses?.userId === currentUser.id && badgeRepasses.refresh === refreshKey
+    ? badgeRepasses.count
     : 0;
 
   return (
@@ -231,7 +250,7 @@ if (!isAuthenticated || !currentUser) {
               addToast(
                 'success',
                 'Recebimento Confirmado!',
-                'Seu recibo digital foi assinado e registrado com sucesso.'
+                'Sua confirmação de recebimento foi registrada com sucesso.'
               );
             }}
           />
@@ -371,7 +390,7 @@ if (!isAuthenticated || !currentUser) {
           addToast(
             'success',
             'Repasse Registrado!',
-            `Repasse registrado no módulo legado, sem alterar o Caixa oficial. Pagamento disponibilizado para ${nomeProf} assinar o recibo.`
+            `Repasse registrado com saída no Caixa. ${nomeProf} já pode confirmar o recebimento.`
           );
         }}
       />
