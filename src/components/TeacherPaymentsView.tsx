@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { repassesApi, type RepasseProfessor, type RepasseFormaPagamento } from '../services/repassesApi';
 import { useAuth } from '../context/AuthContext';
 import {
   financeService,
@@ -25,15 +26,64 @@ interface TeacherPaymentsViewProps {
   onSuccessConfirmation?: () => void;
 }
 
+const formasRepasse: Record<RepasseFormaPagamento, string> = {
+  PIX: 'PIX', DINHEIRO: 'Dinheiro', TRANSFERENCIA: 'Transferência',
+};
+
+function formatCompetencia(competencia: string): string {
+  const [ano, mes] = competencia.split('-');
+  const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  return `${meses[Number(mes) - 1]}/${ano}`;
+}
+
 export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   onOpenTeacherPaymentModal,
   onSuccessConfirmation,
 }) => {
   const { currentUser, isAdmin } = useAuth();
 
-  // Guard explícito para segurança de null: TeacherPaymentsView é tela autenticada,
-  // mas during session restore `currentUser` pode ser null. Retornamos um placeholder
-  // compatível com a UI até a sessão ser restaurada.
+  const [activeSubTab, setActiveSubTab] = useState<'REPASSES' | 'ADIANTAMENTOS'>('REPASSES');
+  const [confirmingIds, setConfirmingIds] = useState<Set<string>>(new Set());
+  const [confirmingAdvanceId, setConfirmingAdvanceId] = useState<string | null>(null);
+  const [isRequestAdvanceModalOpen, setIsRequestAdvanceModalOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [pagamentos, setPagamentos] = useState<RepasseProfessor[]>([]);
+  const [loadingRepasses, setLoadingRepasses] = useState(true);
+  const [repassesError, setRepassesError] = useState('');
+  const [retryRepasses, setRetryRepasses] = useState(0);
+  const pendingConfirmations = useRef(new Map<string, AbortController>());
+
+  useEffect(() => {
+    const pending = pendingConfirmations.current;
+    setConfirmingIds(new Set());
+    return () => {
+      pending.forEach((controller) => controller.abort());
+      pending.clear();
+    };
+  }, [currentUser?.id, currentUser?.role]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPagamentos([]);
+    setRepassesError('');
+    setLoadingRepasses(true);
+    if (currentUser) {
+      // Sem professorId: a sessão determina o isolamento no backend.
+      repassesApi.listAll({}, controller.signal).then((rows) => {
+        if (!controller.signal.aborted) setPagamentos(rows);
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        setRepassesError(error instanceof Error ? error.message : 'Erro ao carregar repasses.');
+      }).finally(() => {
+        if (!controller.signal.aborted) setLoadingRepasses(false);
+      });
+    }
+    return () => controller.abort();
+  }, [currentUser?.id, currentUser?.role, refreshTick, retryRepasses]);
+
+  // Todos os hooks executam também durante a restauração da sessão.
   if (!currentUser) {
     return (
       <div className="min-h-[200px] flex items-center justify-center text-zinc-400">
@@ -41,20 +91,8 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
       </div>
     );
   }
-  const [activeSubTab, setActiveSubTab] = useState<'REPASSES' | 'ADIANTAMENTOS'>('REPASSES');
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [confirmingAdvanceId, setConfirmingAdvanceId] = useState<string | null>(null);
-  const [isRequestAdvanceModalOpen, setIsRequestAdvanceModalOpen] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [refreshTick, setRefreshTick] = useState(0);
 
   const triggerLocalRefresh = () => setRefreshTick((prev) => prev + 1);
-
-  // Se professor: busca ESTRITAMENTE os pagamentos e adiantamentos dele!
-  // Se admin: busca todos os pagamentos da equipe
-  const pagamentos = isAdmin
-    ? financeService.getPagamentosProfessores()
-    : financeService.getPagamentosProfessores(currentUser.id);
 
   // Professor só carrega ESTRITAMENTE seus próprios adiantamentos
   const adiantamentos = isAdmin
@@ -71,24 +109,37 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   ).length;
 
   // Handler de confirmação de Repasse normal
-  const handleConfirmarRecebimento = (pagamentoId: string) => {
+  const handleConfirmarRecebimento = async (pagamentoId: string) => {
+    const repasse = pagamentos.find((item) => item.id === pagamentoId);
+    if (currentUser.role !== 'PROFESSOR' || repasse?.professorId !== currentUser.id ||
+        repasse.status !== 'AGUARDANDO_RECEBIMENTO' || pendingConfirmations.current.has(pagamentoId)) return;
+    const controller = new AbortController();
+    pendingConfirmations.current.set(pagamentoId, controller);
+    setConfirmingIds((ids) => new Set(ids).add(pagamentoId));
     try {
-      setConfirmingId(pagamentoId);
-      financeService.confirmarRecebimentoProfessor(pagamentoId, currentUser);
-      triggerLocalRefresh();
+      const confirmado = await repassesApi.confirmReceipt(pagamentoId, controller.signal);
+      if (controller.signal.aborted) return;
+      setPagamentos((rows) => rows.map((item) => item.id === confirmado.id ? confirmado : item));
       setFeedbackMessage({
         type: 'success',
         text: 'Recebimento de repasse confirmado com sucesso! Recibo digital emitido.',
       });
-      if (onSuccessConfirmation) onSuccessConfirmation();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return;
       setFeedbackMessage({
         type: 'error',
-        text: err?.message || 'Erro ao confirmar recebimento.',
+        text: err instanceof Error ? err.message : 'Erro ao confirmar recebimento.',
       });
+      return;
     } finally {
-      setConfirmingId(null);
+      if (pendingConfirmations.current.get(pagamentoId) === controller) {
+        pendingConfirmations.current.delete(pagamentoId);
+        if (!controller.signal.aborted) setConfirmingIds((ids) => {
+          const next = new Set(ids); next.delete(pagamentoId); return next;
+        });
+      }
     }
+    onSuccessConfirmation?.();
   };
 
   // Handler de confirmação de Adiantamento
@@ -253,11 +304,17 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
           )}
 
           {/* Lista de Pagamentos de Repasse */}
-          {pagamentos.length === 0 ? (
+          {loadingRepasses ? (
+            <p role="status" className="p-4 text-xs text-zinc-400">Carregando repasses...</p>
+          ) : repassesError ? (
+            <div role="alert" className="p-3.5 rounded-2xl border border-red-500/20 bg-red-500/10 text-xs text-red-300">
+              {repassesError} <button type="button" onClick={() => setRetryRepasses((value) => value + 1)} className="underline">Tentar novamente</button>
+            </div>
+          ) : pagamentos.length === 0 ? (
             <div className="p-8 text-center bg-[#18181b] rounded-2xl border border-white/10 space-y-2 text-white">
               <Wallet className="w-8 h-8 text-zinc-600 mx-auto" />
               <p className="text-sm font-semibold text-zinc-200">
-                Nenhum registro de pagamento encontrado.
+                Nenhum repasse encontrado.
               </p>
               <p className="text-xs text-zinc-400">
                 {isAdmin
@@ -284,10 +341,10 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs font-bold text-zinc-300 bg-white/10 px-2 py-0.5 rounded-full border border-white/10">
-                            {pag.competencia}
+                            {formatCompetencia(pag.competencia)}
                           </span>
                           <span className="text-xs font-semibold text-zinc-400">
-                            via {pag.formaPagamento}
+                            via {formasRepasse[pag.formaPagamento]}
                           </span>
                         </div>
 
@@ -296,7 +353,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                         </h3>
 
                         <p className="text-xs text-zinc-400 mt-0.5">
-                          Pago pela academia em {formatDateBR(pag.dataPagamento)}
+                          Pago pela academia em {formatDateBR(pag.dataRepasse)}
                         </p>
                       </div>
 
@@ -313,7 +370,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                         {isConfirmado && (
                           <span className="inline-flex items-center gap-1 text-[10px] font-black text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded-full mt-0.5 border border-lime-400/30">
                             <CheckCircle2 className="w-3 h-3" />
-                            <span>Confirmado</span>
+                            <span>Recebimento confirmado</span>
                           </span>
                         )}
                       </div>
@@ -326,30 +383,30 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                           <div className="flex items-center gap-1.5 text-lime-400 font-medium">
                             <FileCheck className="w-4 h-4 text-lime-400 shrink-0" />
                             <span>
-                              Recibo assinado pelo professor em {formatDateTimeBR(pag.confirmadoEm || '')}
+                              Recebimento confirmado pelo professor em {formatDateTimeBR(pag.confirmadoEm || '')}
                             </span>
                           </div>
                         ) : (
                           <span className="text-amber-300/90">
                             {isAdmin
-                              ? 'Aguardando o professor assinar o recibo no app dele.'
+                              ? 'Aguardando o professor confirmar o recebimento.'
                               : 'Confira se o valor entrou na sua conta bancária.'}
                           </span>
                         )}
                       </div>
 
-                      {/* Apenas o professor dono do pagamento (ou admin testando) pode clicar no botão */}
-                      {isPendente && isMyPayment && (
+                      {/* Somente o PROFESSOR destinatário; backend continua autoridade final. */}
+                      {currentUser.role === 'PROFESSOR' && isPendente && isMyPayment && (
                         <button
                           type="button"
                           id={`btn-confirmar-recebimento-${pag.id}`}
                           onClick={() => handleConfirmarRecebimento(pag.id)}
-                          disabled={confirmingId === pag.id}
+                          disabled={confirmingIds.has(pag.id)}
                           className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-xs shadow-lg shadow-lime-500/20 transition-all active:scale-95 shrink-0 disabled:opacity-50"
                         >
                           <Check className="w-4 h-4 stroke-[3]" />
                           <span>
-                            {confirmingId === pag.id
+                            {confirmingIds.has(pag.id)
                               ? 'Confirmando...'
                               : 'Confirmar que recebi'}
                           </span>
@@ -597,4 +654,3 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
     </div>
   );
 };
-
