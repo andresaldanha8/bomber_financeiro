@@ -11,7 +11,7 @@ import { prisma } from '../lib/prisma';
 import { createSession } from '../services/auth.service';
 import repassesRoutes from '../routes/repasses.routes';
 
-test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 60000 }, async () => {
+test('RDD-002.6.3 + regressão 002.6.2: HTTP + autenticação real + PostgreSQL', { timeout: 60000 }, async (t) => {
   assert(prisma.repasseProfessor, 'Execute npx prisma generate antes dos testes.');
   const ids = Array.from({ length: 4 }, () => randomUUID());
   const [adminId, professorId, outroId, inativoId] = ids;
@@ -38,8 +38,26 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     assert.equal(result.status, expected, JSON.stringify(result.body));
     return result.body;
   }
-  const payload = { professorId, competencia: '2026-09', valor: 123.45, dataRepasse: '2026-09-15', formaPagamento: 'PIX' };
-  const passed = (letters: string) => console.log(`PASS ${letters}`);
+  const payload = { professorId, competencia: '2026-09', valor: 123.45, dataRepasse: '2024-02-29', formaPagamento: 'PIX' };
+  const passed = (letters: string) => console.log(`PASS regressão 002.6.2: ${letters}`);
+  const passedCaixa = (letters: string) => console.log(`PASS 002.6.3: ${letters}`);
+  const movimentos = () => prisma.movimentoCaixa.findMany({ orderBy: { id: 'asc' } });
+  async function verificarSaida(repasseId: string) {
+    const repasse = await prisma.repasseProfessor.findUniqueOrThrow({ where: { id: repasseId }, include: { professor: true } });
+    const rows = await prisma.movimentoCaixa.findMany({ where: { referenciaId: repasse.id } });
+    assert.equal(rows.length, 1);
+    const movimento = rows[0];
+    assert.equal(movimento.tipo, 'SAIDA');
+    assert.equal(movimento.origem, 'REPASSE_PROFESSOR');
+    assert(movimento.valor.equals(repasse.valor));
+    assert.equal(movimento.dataFinanceira.getTime(), repasse.dataRepasse.getTime());
+    assert.equal(movimento.dataFinanceira.toISOString(), '2024-02-29T00:00:00.000Z');
+    assert.equal(movimento.referenciaId, repasse.id);
+    assert.equal(movimento.chaveIdempotencia, `REPASSE_PROFESSOR:${repasse.id}`);
+    assert.equal(movimento.criadoPorId, adminId);
+    assert.equal(movimento.descricao, `Repasse - ${repasse.professor.name} - ${repasse.competencia}`);
+    assert.equal(movimento.observacao, null);
+  }
   try {
     const caixaAntes = await prisma.movimentoCaixa.findMany({ orderBy: { id: 'asc' } });
     for (const [i, id] of ids.entries()) {
@@ -54,6 +72,10 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     await checkStatus('GET', '', inativoId, undefined, 401);
 
     const created = (await checkStatus('POST', '', adminId, payload, 201)).repasse;
+    assert.equal(await prisma.repasseProfessor.count({ where: { registradoPorId: adminId } }), 1);
+    assert.equal(await prisma.movimentoCaixa.count({ where: { criadoPorId: adminId } }), 1);
+    await verificarSaida(created.id);
+    passedCaixa('A–K');
     const path = `/${created.id}`;
     assert.equal(created.valor, 123.45);
     assert.equal(created.dataRepasse, payload.dataRepasse);
@@ -108,7 +130,10 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     await checkStatus('POST', `/${other.id}/confirmacao`, professorId, {}, 404);
     passed('N');
     await checkStatus('POST', `${path}/confirmacao`, professorId, { confirmadoPorId: outroId }, 400);
+    const antesConfirmacao = await movimentos();
     const confirmed = (await checkStatus('POST', `${path}/confirmacao`, professorId, {}, 200)).repasse;
+    assert.deepEqual(await movimentos(), antesConfirmacao);
+    passedCaixa('N–O');
     passed('O');
     assert.equal(confirmed.status, 'RECEBIMENTO_CONFIRMADO');
     assert.equal(confirmed.confirmadoPorId, professorId);
@@ -121,9 +146,13 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     assert.equal(persisted.confirmadoPorId, professorId);
     passed('P');
     assert.deepEqual((await checkStatus('POST', `${path}/confirmacao`, professorId, undefined, 200)).repasse, confirmed);
+    assert.deepEqual(await movimentos(), antesConfirmacao);
+    passedCaixa('P');
     passed('Q');
 
     const concurrent = (await checkStatus('POST', '', adminId, { ...payload, formaPagamento: 'DINHEIRO', valor: 99999999.99 }, 201)).repasse;
+    await verificarSaida(concurrent.id);
+    const antesConcorrencia = await movimentos();
     // Segura a linha até as duas requisições estarem esperando no PostgreSQL.
     let release!: () => void;
     let locked!: () => void;
@@ -163,6 +192,8 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     assert.equal(receipt.confirmadoEm?.toISOString(), responses[0].body.repasse.confirmadoEm);
     assert.equal(receipt.confirmadoPorId, professorId);
     assert.deepEqual((await checkStatus('POST', `/${concurrent.id}/confirmacao`, professorId, {}, 200)).repasse, responses[0].body.repasse);
+    assert.deepEqual(await movimentos(), antesConcorrencia);
+    passedCaixa('Q');
     passed('R');
     await checkStatus('POST', `${path}/confirmacao`, adminId, {}, 403);
     await checkStatus('POST', `/${other.id}/confirmacao`, adminId, {}, 403);
@@ -171,25 +202,82 @@ test('RDD-002.6.2: HTTP + autenticação real + PostgreSQL (A–T)', { timeout: 
     for (const query of ['status=INVALIDO', 'competencia=2026-13', 'dataInicio=2026-02-30', 'dataInicio=2026-10-01&dataFim=2026-09-01', 'limit=0', 'limit=1001', 'offset=-1', 'limit=1&limit=2', 'status[x]=a']) {
       await checkStatus('GET', `?${query}`, adminId, undefined, 400);
     }
-    const filtered = (await checkStatus('GET', `?professorId=${professorId}&status=RECEBIMENTO_CONFIRMADO&competencia=2026-09&dataInicio=2026-09-15&dataFim=2026-09-15&limit=1&offset=0`, adminId, undefined, 200)).repasses;
+    const filtered = (await checkStatus('GET', `?professorId=${professorId}&status=RECEBIMENTO_CONFIRMADO&competencia=2026-09&dataInicio=2024-02-29&dataFim=2024-02-29&limit=1&offset=0`, adminId, undefined, 200)).repasses;
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0].professorId, professorId);
     for (const method of ['PATCH', 'PUT', 'DELETE']) await checkStatus(method, path, adminId, {}, 404);
-    assert.deepEqual(await prisma.movimentoCaixa.findMany({ orderBy: { id: 'asc' } }), caixaAntes);
+    const duplicate = (await checkStatus('POST', '', adminId, payload, 201)).repasse;
+    assert.notEqual(duplicate.id, created.id);
+    assert.equal(await prisma.repasseProfessor.count({ where: {
+      professorId, competencia: payload.competencia, valor: payload.valor,
+      dataRepasse: new Date(`${payload.dataRepasse}T00:00:00.000Z`),
+    } }), 2);
+    await verificarSaida(created.id);
+    await verificarSaida(duplicate.id);
+    await verificarSaida(other.id);
+    passedCaixa('R–S');
+
+    // Falha real de FK no INSERT do movimento, injetada somente nesta requisição.
+    // O repasse existe dentro da transação antes da falha e deve desaparecer no rollback.
+    const repassesAntesFalha = await prisma.repasseProfessor.findMany({ where: { registradoPorId: adminId }, orderBy: { id: 'asc' } });
+    const caixaAntesFalha = await movimentos();
+    let repasseRevertido: string | undefined;
+    const originalTransaction = prisma.$transaction;
+    const transaction = originalTransaction.bind(prisma);
+    // Prisma usa propriedades dinâmicas; o proxy mantém a transação real e só troca o FK do INSERT.
+    prisma.$transaction = ((operation, options) => transaction(async (tx) => operation(new Proxy(tx, {
+      get(target, property, receiver) {
+        if (property !== 'movimentoCaixa') return Reflect.get(target, property, receiver);
+        return new Proxy(target.movimentoCaixa, {
+          get(delegate, method, delegateReceiver) {
+            if (method !== 'create') return Reflect.get(delegate, method, delegateReceiver);
+            return async (args) => {
+              repasseRevertido = args.data.referenciaId;
+              assert(await tx.repasseProfessor.findUnique({ where: { id: repasseRevertido } }));
+              return delegate.create({ ...args, data: { ...args.data, criadoPorId: randomUUID() } });
+            };
+          },
+        });
+      },
+    })), options)) as typeof prisma.$transaction;
+    const errorMock = t.mock.method(console, 'error', () => {});
+    try {
+      const failure = await checkStatus('POST', '', adminId, payload, 500);
+      assert.equal(failure.repasse, undefined);
+      assert(repasseRevertido, 'A falha deve acontecer após a criação transacional do repasse.');
+      assert.equal(errorMock.mock.calls.length, 1);
+      assert.equal((errorMock.mock.calls[0].arguments[1] as { code: string }).code, 'P2003');
+    } finally {
+      prisma.$transaction = originalTransaction;
+      errorMock.mock.restore();
+    }
+    assert.equal(await prisma.repasseProfessor.findUnique({ where: { id: repasseRevertido } }), null);
+    assert.deepEqual(await prisma.repasseProfessor.findMany({ where: { registradoPorId: adminId }, orderBy: { id: 'asc' } }), repassesAntesFalha);
+    assert.deepEqual(await movimentos(), caixaAntesFalha);
+    assert.equal(await prisma.movimentoCaixa.count({ where: { referenciaId: repasseRevertido } }), 0);
+    passedCaixa('L–M');
+
+    assert.equal(await prisma.repasseProfessor.count({ where: { registradoPorId: adminId } }), 4);
+    assert.equal(await prisma.movimentoCaixa.count({ where: { criadoPorId: adminId } }), 4);
+    assert.deepEqual((await movimentos()).filter((m) => m.criadoPorId !== adminId), caixaAntes);
     const service = await readFile(new URL('../services/repasses.service.ts', import.meta.url), 'utf8');
-    assert(!/movimentoCaixa|movimentos_caixa|chaveIdempotencia/.test(service));
-    passed('T — Caixa integralmente preservado; zero movimentos criados');
+    assert(!/localStorage|financeService/.test(service));
+    passedCaixa('T — backend sem localStorage');
+    passed('T adaptado: uma SAÍDA por criação; zero novos movimentos na confirmação');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     try {
       await prisma.$transaction(async (tx) => {
+        await tx.movimentoCaixa.deleteMany({ where: { criadoPorId: adminId } });
         await tx.repasseProfessor.deleteMany({ where: { registradoPorId: adminId } });
         await tx.session.deleteMany({ where: { userId: { in: ids } } });
         await tx.user.deleteMany({ where: { id: { in: ids } } });
       });
       assert.equal(await prisma.user.count({ where: { id: { in: ids } } }), 0);
       assert.equal(await prisma.repasseProfessor.count({ where: { registradoPorId: adminId } }), 0);
-      console.log('Cleanup confirmado: usuários, sessões e repasses temporários removidos.');
+      assert.equal(await prisma.movimentoCaixa.count({ where: { criadoPorId: adminId } }), 0);
+      assert.equal(await prisma.session.count({ where: { userId: { in: ids } } }), 0);
+      console.log('Cleanup confirmado: usuários, sessões, repasses e movimentos temporários removidos.');
     } finally { await prisma.$disconnect(); }
   }
 });

@@ -102,15 +102,26 @@ export async function criarRepasse(input: unknown, ator: Ator) {
     if (professor.role !== 'PROFESSOR') throw new RepasseError(400, 'Destinatário deve ser PROFESSOR.');
     if (!professor.active) throw new RepasseError(400, 'Professor inativo.');
 
-    // RDD-002.6.2: cadastro temporariamente sem efeito no Caixa; integração na 002.6.3.
-    return serializar(await tx.repasseProfessor.create({
+    const repasse = await tx.repasseProfessor.create({
       data: {
         professorId, competencia, valor, dataRepasse, formaPagamento,
         status: 'AGUARDANDO_RECEBIMENTO', registradoPorId: ator.id,
         confirmadoPorId: null, confirmadoEm: null,
       },
       include,
-    }));
+    });
+    // O repasse e sua SAÍDA só podem persistir juntos, na mesma transação.
+    await tx.movimentoCaixa.create({ data: {
+      tipo: 'SAIDA',
+      origem: 'REPASSE_PROFESSOR',
+      valor: repasse.valor,
+      dataFinanceira: repasse.dataRepasse,
+      descricao: `Repasse - ${repasse.professor.name} - ${repasse.competencia}`,
+      referenciaId: repasse.id,
+      chaveIdempotencia: `REPASSE_PROFESSOR:${repasse.id}`,
+      criadoPorId: repasse.registradoPorId,
+    } });
+    return serializar(repasse);
   });
 }
 
