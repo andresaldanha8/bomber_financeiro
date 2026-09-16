@@ -11,6 +11,7 @@ import pagamentosRoutes from './routes/pagamentos.routes';
 import caixaRoutes from './routes/caixa.routes';
 import despesasRoutes from './routes/despesas.routes';
 import repassesRoutes from './routes/repasses.routes';
+import adiantamentosRoutes from './routes/adiantamentos.routes';
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use('/api', pagamentosRoutes);
 app.use('/api/caixa', caixaRoutes);
 app.use('/api/despesas', despesasRoutes);
 app.use('/api/repasses', repassesRoutes);
+app.use('/api/adiantamentos', adiantamentosRoutes);
 
 app.listen(PORT, () => {
   console.log(`Bomber Financeiro API rodando em http://localhost:${PORT}`);
