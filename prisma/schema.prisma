@@ -78,6 +78,15 @@ enum RepasseProfessorStatus {
   @@map("repasse_professor_status")
 }
 
+enum AdiantamentoProfessorStatus {
+  SOLICITADO
+  RECUSADO
+  PAGO_AGUARDANDO_CONFIRMACAO
+  CONFIRMADO
+
+  @@map("adiantamento_professor_status")
+}
+
 enum DespesaCategoria {
   PROFESSORES  @map("Professores")
   ENERGIA      @map("Energia")
@@ -117,6 +126,11 @@ model User {
   repassesRecebidos   RepasseProfessor[] @relation("RepasseProfessorDestinatario")
   repassesRegistrados RepasseProfessor[] @relation("RepasseProfessorRegistradoPor")
   repassesConfirmados RepasseProfessor[] @relation("RepasseProfessorConfirmadoPor")
+
+  adiantamentosRecebidos   AdiantamentoProfessor[] @relation("AdiantamentoProfessorDestinatario")
+  adiantamentosAnalisados  AdiantamentoProfessor[] @relation("AdiantamentoProfessorAnalisadoPor")
+  adiantamentosRegistrados AdiantamentoProfessor[] @relation("AdiantamentoProfessorRegistradoPor")
+  adiantamentosConfirmados AdiantamentoProfessor[] @relation("AdiantamentoProfessorConfirmadoPor")
 
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -291,6 +305,40 @@ model RepasseProfessor {
   @@index([registradoPorId], map: "idx_repasses_registrado_por")
   @@index([confirmadoPorId], map: "idx_repasses_confirmado_por")
   @@map("repasses_professores")
+}
+
+model AdiantamentoProfessor {
+  id           String                       @id @default(cuid())
+  professorId  String                       @map("professor_id")
+  valor        Decimal                      @db.Decimal(10, 2)
+  motivo       String?
+  status       AdiantamentoProfessorStatus  @default(SOLICITADO)
+
+  analisadoPorId String?   @map("analisado_por_id")
+  analisadoEm    DateTime? @map("analisado_em") @db.Timestamptz(3)
+  motivoRecusa   String?   @map("motivo_recusa")
+
+  dataPagamento       DateTime? @map("data_pagamento") @db.Date
+  formaPagamento      String?   @map("forma_pagamento") @db.VarChar(100)
+  registradoPorId     String?   @map("registrado_por_id")
+  pagoEm              DateTime? @map("pago_em") @db.Timestamptz(3)
+  observacaoPagamento String?   @map("observacao_pagamento")
+
+  confirmadoPorId String?   @map("confirmado_por_id")
+  confirmadoEm    DateTime? @map("confirmado_em") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  professor     User  @relation("AdiantamentoProfessorDestinatario", fields: [professorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  analisadoPor  User? @relation("AdiantamentoProfessorAnalisadoPor", fields: [analisadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  registradoPor User? @relation("AdiantamentoProfessorRegistradoPor", fields: [registradoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  confirmadoPor User? @relation("AdiantamentoProfessorConfirmadoPor", fields: [confirmadoPorId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  // CHECKs de valor, forma, datas e consistencia dos estados estao na migration SQL.
+  @@index([professorId], map: "idx_adiantamentos_professor")
+  @@index([status], map: "idx_adiantamentos_status")
+  @@index([dataPagamento], map: "idx_adiantamentos_data_pagamento")
+  @@index([createdAt], map: "idx_adiantamentos_created_at")
+  @@map("adiantamentos_professores")
 }
 
 model MovimentoCaixa {
