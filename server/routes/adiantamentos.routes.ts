@@ -47,6 +47,13 @@ router.post('/:id/recusa', async (req: AuthenticatedRequest, res) => {
   } catch (error) { return responderErro(res, error); }
 });
 
+router.post('/:id/pagamento', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (req.authUser!.role !== 'ADMIN') return res.status(403).json({ message: 'Acesso restrito ao ADMIN.' });
+    return res.status(200).json({ adiantamento: await AdiantamentosService.registrarPagamento(req.params.id, req.body, req.authUser!) });
+  } catch (error) { return responderErro(res, error); }
+});
+
 router.post('/:id/confirmacao', async (req: AuthenticatedRequest, res) => {
   try {
     if (req.authUser!.role !== 'PROFESSOR') return res.status(403).json({ message: 'Acesso restrito ao PROFESSOR.' });

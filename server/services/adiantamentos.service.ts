@@ -1,5 +1,6 @@
 import { Prisma } from '../../src/generated/prisma/client';
 import { prisma } from '../lib/prisma';
+import { compararDatasCivis, dataCivilDoInstante, normalizarDataCivil } from '../domain/financeDates';
 import type { AuthenticatedRequest } from '../middleware/auth.middleware';
 import { executarTransacaoComRetry } from './transactionRetry';
 
@@ -49,6 +50,24 @@ function valorMonetario(value: unknown): Prisma.Decimal {
     throw new AdiantamentoError(400, 'valor deve estar entre 0.01 e 99999999.99, com no máximo duas casas decimais.');
   }
   return valor;
+}
+
+function dataCivil(value: unknown, campo: string): Date {
+  if (typeof value !== 'string') throw new AdiantamentoError(400, `${campo} inválida. Use YYYY-MM-DD.`);
+  try {
+    const data = normalizarDataCivil(value);
+    if (data.getUTCFullYear() === 0) throw new Error('Ano inválido');
+    return data;
+  } catch {
+    throw new AdiantamentoError(400, `${campo} inválida. Use YYYY-MM-DD.`);
+  }
+}
+
+function formaPagamento(value: unknown): string {
+  if (typeof value !== 'string' || !['PIX', 'DINHEIRO', 'TRANSFERENCIA'].includes(value)) {
+    throw new AdiantamentoError(400, 'formaPagamento inválida.');
+  }
+  return value;
 }
 
 const include = {
@@ -162,6 +181,84 @@ export async function recusarAdiantamento(id: string, input: unknown, ator: Ator
       data: { status: 'RECUSADO', analisadoPorId: ator.id, analisadoEm: new Date(), motivoRecusa },
       include,
     }));
+  });
+}
+
+export async function registrarPagamento(id: string, input: unknown, ator: Ator) {
+  autorizar(ator, 'ADMIN');
+  const body = objeto(input);
+  somenteCampos(body, ['dataPagamento', 'formaPagamento', 'observacaoPagamento']);
+  const dataPagamento = dataCivil(body.dataPagamento, 'dataPagamento');
+  const forma = formaPagamento(body.formaPagamento);
+  const observacaoPagamento = textoOpcional(body.observacaoPagamento, 'observacaoPagamento');
+  const chaveIdempotencia = `ADIANTAMENTO_PROFESSOR:${id}:PAGAMENTO`;
+
+  return executarTransacaoComRetry(prisma, async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM adiantamentos_professores WHERE id = ${id} FOR UPDATE
+    `;
+    if (!locked.length) throw new AdiantamentoError(404, 'Adiantamento não encontrado.');
+    const atual = await tx.adiantamentoProfessor.findUniqueOrThrow({ where: { id }, include });
+    const movimentos = await tx.movimentoCaixa.findMany({
+      where: { OR: [{ referenciaId: id }, { chaveIdempotencia }] },
+    });
+
+    if (atual.status === 'PAGO_AGUARDANDO_CONFIRMACAO' || atual.status === 'CONFIRMADO') {
+      const movimento = movimentos[0];
+      const consistente = movimentos.length === 1 && movimento.tipo === 'SAIDA' &&
+        movimento.origem === 'ADIANTAMENTO_PROFESSOR' && movimento.valor.equals(atual.valor) &&
+        movimento.dataFinanceira.getTime() === atual.dataPagamento?.getTime() &&
+        movimento.referenciaId === atual.id && movimento.criadoPorId === atual.registradoPorId &&
+        movimento.chaveIdempotencia === chaveIdempotencia;
+      if (!consistente) {
+        throw new AdiantamentoError(409, 'Pagamento inconsistente com o MovimentoCaixa persistido.');
+      }
+      return serializar(atual);
+    }
+
+    if (atual.status !== 'SOLICITADO') {
+      throw new AdiantamentoError(409, 'Somente adiantamento SOLICITADO pode ser pago.');
+    }
+    if (movimentos.length) {
+      throw new AdiantamentoError(409, 'Adiantamento SOLICITADO já possui MovimentoCaixa de pagamento.');
+    }
+
+    const dataSolicitacao = dataCivilDoInstante(atual.createdAt);
+    const hoje = dataCivilDoInstante(new Date());
+    if (compararDatasCivis(dataPagamento, dataSolicitacao) < 0) {
+      throw new AdiantamentoError(400, 'dataPagamento não pode ser anterior à solicitação.');
+    }
+    if (compararDatasCivis(dataPagamento, hoje) > 0) {
+      throw new AdiantamentoError(400, 'dataPagamento não pode ser futura.');
+    }
+
+    const agora = new Date();
+    const pago = await tx.adiantamentoProfessor.update({
+      where: { id },
+      data: {
+        status: 'PAGO_AGUARDANDO_CONFIRMACAO',
+        analisadoPorId: ator.id,
+        analisadoEm: agora,
+        dataPagamento,
+        formaPagamento: forma,
+        registradoPorId: ator.id,
+        pagoEm: agora,
+        observacaoPagamento,
+      },
+      include,
+    });
+    await tx.movimentoCaixa.create({ data: {
+      tipo: 'SAIDA',
+      origem: 'ADIANTAMENTO_PROFESSOR',
+      valor: pago.valor,
+      dataFinanceira: pago.dataPagamento!,
+      descricao: `Adiantamento - ${pago.professor.name}`,
+      referenciaId: pago.id,
+      chaveIdempotencia,
+      criadoPorId: ator.id,
+      observacao: pago.observacaoPagamento,
+    } });
+    return serializar(pago);
   });
 }
 

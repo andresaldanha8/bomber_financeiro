@@ -163,12 +163,120 @@ test('RDD-002.7.2: API PostgreSQL de adiantamentos', { timeout: 60000 }, async (
       await check('GET', `?${query}`, adminId, undefined, 400);
     }
     for (const method of ['PUT', 'PATCH', 'DELETE']) await check(method, `/${criado.id}`, adminId, {}, 404);
-    await check('POST', `/${criado.id}/pagamento`, adminId, {}, 404);
-    assert.equal(await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: { in: adiantamentoIds } } }), 0);
+
+    // --- RDD-002.7.3: Pagamento administrativo e integração com Caixa ---
+    const pagoTestId = await criarDireto(professorId, 'SOLICITADO');
+
+    // 7. Autorização: PROFESSOR não pode pagar
+    await check('POST', `/${pagoTestId}/pagamento`, professorId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }, 403);
+    assert.equal(await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: pagoTestId } }), 0);
+
+    // 8. Datas: futura rejeitada, anterior à solicitação rejeitada, válida aceita
+    const futuroId = await criarDireto(professorId, 'SOLICITADO');
+    await check('POST', `/${futuroId}/pagamento`, adminId, { dataPagamento: '2026-09-17', formaPagamento: 'PIX' }, 400);
+    const anteriorId = await criarDireto(professorId, 'SOLICITADO');
+    await check('POST', `/${anteriorId}/pagamento`, adminId, { dataPagamento: '2026-09-14', formaPagamento: 'PIX' }, 400);
+
+    // Pagamento válido
+    const body = { dataPagamento: '2026-09-15', formaPagamento: 'PIX', observacaoPagamento: 'Pago externamente' };
+    const pagoRes = (await check('POST', `/${pagoTestId}/pagamento`, adminId, body, 200)).adiantamento;
+    assert.equal(pagoRes.status, 'PAGO_AGUARDANDO_CONFIRMACAO');
+    assert.equal(pagoRes.analisadoPorId, adminId);
+    assert(Number.isFinite(Date.parse(pagoRes.analisadoEm)));
+    assert.equal(pagoRes.dataPagamento, '2026-09-15');
+    assert.equal(pagoRes.formaPagamento, 'PIX');
+    assert.equal(pagoRes.registradoPorId, adminId);
+    assert(Number.isFinite(Date.parse(pagoRes.pagoEm)));
+    assert.equal(pagoRes.observacaoPagamento, 'Pago externamente');
+
+    // 6. MovimentoCaixa criado exatamente 1
+    const movimentos = await prisma.movimentoCaixa.findMany({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: pagoTestId } });
+    assert.equal(movimentos.length, 1);
+    const mov = movimentos[0];
+    assert.equal(mov.tipo, 'SAIDA');
+    assert.equal(mov.origem, 'ADIANTAMENTO_PROFESSOR');
+    assert.equal(mov.referenciaId, pagoTestId);
+    assert.equal(mov.criadoPorId, adminId);
+    assert.equal(mov.chaveIdempotencia, `ADIANTAMENTO_PROFESSOR:${pagoTestId}:PAGAMENTO`);
+
+    // 9. Idempotência: segunda chamada não cria nova SAIDA e preserva campos originais
+    const segundo = (await check('POST', `/${pagoTestId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'TRANSFERENCIA', observacaoPagamento: 'Segunda tentativa' }, 200)).adiantamento;
+    assert.equal((await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: pagoTestId } })), 1);
+    assert.equal(segundo.dataPagamento, pagoRes.dataPagamento);
+    assert.equal(segundo.formaPagamento, pagoRes.formaPagamento);
+    assert.equal(segundo.observacaoPagamento, pagoRes.observacaoPagamento);
+    assert.equal(segundo.analisadoPorId, pagoRes.analisadoPorId);
+    assert.equal(segundo.registradoPorId, pagoRes.registradoPorId);
+
+    // 10. Pagamento concorrente: duas solicitações simultâneas resultam em exatamente 1 movimento
+    const concId = await criarDireto(professorId, 'SOLICITADO');
+    await Promise.all([
+      request('POST', `/${concId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }),
+      request('POST', `/${concId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }),
+    ]);
+    assert.equal((await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: concId } })), 1);
+    assert.equal((await prisma.adiantamentoProfessor.findUniqueOrThrow({ where: { id: concId } })).status, 'PAGO_AGUARDANDO_CONFIRMACAO');
+
+    // 11. Rollback atômico: simular falha na criação do MovimentoCaixa
+    const rbId = await criarDireto(professorId, 'SOLICITADO');
+    const rbChave = `ADIANTAMENTO_PROFESSOR:${rbId}:PAGAMENTO`;
+    const originalTransaction = prisma.$transaction;
+    try {
+      // interceptar $transaction para injetar falha no tx.movimentoCaixa.create
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      prisma.$transaction = async (operation: any, opts?: any) => {
+        return originalTransaction(async (tx: any) => {
+          const origCreate = tx.movimentoCaixa.create;
+          // @ts-ignore
+          tx.movimentoCaixa.create = async (args: any) => {
+            if (args?.data?.chaveIdempotencia === rbChave) throw new Error('Simulated failure creating movimento');
+            return origCreate.call(tx.movimentoCaixa, args);
+          };
+          return operation(tx);
+        }, opts);
+      };
+      const resp = await request('POST', `/${rbId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' });
+      assert(resp.status >= 400, `Esperado erro ao simular falha na criação do movimento, recebeu ${resp.status}`);
+      const after = await prisma.adiantamentoProfessor.findUniqueOrThrow({ where: { id: rbId } });
+      assert.equal(after.status, 'SOLICITADO');
+      assert.equal(after.dataPagamento, null);
+      assert.equal(after.registradoPorId, null);
+      assert.equal(after.pagoEm, null);
+      assert.equal((await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: rbId } })), 0);
+    } finally {
+      // restaurar
+      // @ts-ignore
+      prisma.$transaction = originalTransaction;
+    }
+
+    // 12. Pagamento × Recusa concorrentes: apenas um resultado válido
+    const raceId = await criarDireto(professorId, 'SOLICITADO');
+    await Promise.all([
+      request('POST', `/${raceId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }),
+      request('POST', `/${raceId}/recusa`, adminId, { motivoRecusa: 'Recusar concorrente' }),
+    ]);
+    const final = await prisma.adiantamentoProfessor.findUniqueOrThrow({ where: { id: raceId } });
+    const finalMovCount = await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: raceId } });
+    assert((final.status === 'PAGO_AGUARDANDO_CONFIRMACAO' && finalMovCount === 1) || (final.status === 'RECUSADO' && finalMovCount === 0));
+
+    // 13. Confirmação posterior pelo PROFESSOR não cria novo movimento
+    const confId = await criarDireto(professorId, 'SOLICITADO');
+    await check('POST', `/${confId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }, 200);
+    await check('POST', `/${confId}/confirmacao`, professorId, {}, 200);
+    assert.equal((await prisma.movimentoCaixa.count({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: confId } })), 1);
+
+    // 14. Inconsistência defensiva: PAGO_AGUARDANDO_CONFIRMACAO sem MovimentoCaixa -> pagamento deve retornar 409
+    const inconsistentId = await criarDireto(professorId, 'PAGO_AGUARDANDO_CONFIRMACAO');
+    await check('POST', `/${inconsistentId}/pagamento`, adminId, { dataPagamento: '2026-09-15', formaPagamento: 'PIX' }, 409);
+
+    // Contagem final básica para limpar expectativas (não é uma asserção forte de quantidade global)
+    // (os testes abaixo removem tudo no cleanup)
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     try {
       await prisma.$transaction(async (tx) => {
+        await tx.movimentoCaixa.deleteMany({ where: { origem: 'ADIANTAMENTO_PROFESSOR', referenciaId: { in: adiantamentoIds } } });
         await tx.adiantamentoProfessor.deleteMany({ where: { id: { in: adiantamentoIds } } });
         await tx.session.deleteMany({ where: { userId: { in: userIds } } });
         await tx.user.deleteMany({ where: { id: { in: userIds } } });
