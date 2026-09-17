@@ -132,29 +132,43 @@ export type StatusAdiantamento =
   | 'RECUSADO'
   | 'PAGO_AGUARDANDO_CONFIRMACAO'
   | 'CONFIRMADO';
+export type AdiantamentoFormaPagamento = 'PIX' | 'DINHEIRO' | 'TRANSFERENCIA';
 
+/**
+ * Tipo oficial alinhado ao serializer PostgreSQL. Campos legados são preservados
+ * (opcionais) para compatibilidade temporária com componentes ainda não migrados.
+ */
 export interface AdiantamentoProfessor {
   id: string;
   professorId: string;
   professorNome: string;
   valor: number;
-  dataSolicitacao: string; // ISO string
-  motivo?: string;
+
+  // Oficial (API PostgreSQL)
+  motivo?: string | null;
   status: StatusAdiantamento;
+  createdAt: string;
 
-  analisadoPorId?: string;
-  analisadoPorNome?: string;
-  analisadoEm?: string;
-  motivoRecusa?: string;
+  analisadoPorId?: string | null;
+  analisadoPorNome?: string | null;
+  analisadoEm?: string | null;
+  motivoRecusa?: string | null;
 
-  dataPagamento?: string; // YYYY-MM-DD
-  formaPagamento?: string;
-  registradoPorId?: string;
-  registradoPorNome?: string;
-  pagoEm?: string; // ISO string
-  observacaoPagamento?: string;
+  dataPagamento?: string | null; // YYYY-MM-DD
+  formaPagamento?: AdiantamentoFormaPagamento | null;
+  registradoPorId?: string | null;
+  registradoPorNome?: string | null;
+  pagoEm?: string | null; // ISO string
+  observacaoPagamento?: string | null;
 
-  confirmadoRecebimentoEm?: string; // ISO string
+  confirmadoPorId?: string | null;
+  confirmadoPorNome?: string | null;
+  confirmadoEm?: string | null; // ISO
+
+  // Campos legados mantidos temporariamente para evitar que a UI quebre.
+  // Serão removidos na RDD-002.7.4.5 após migrar todos os consumidores.
+  dataSolicitacao?: string; // LEGACY: ISO string
+  confirmadoRecebimentoEm?: string; // LEGACY: ISO string
 }
 
 export type TipoMovimentacaoCaixa = 'ENTRADA' | 'SAIDA';
