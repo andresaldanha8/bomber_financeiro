@@ -12,6 +12,9 @@ export type PagamentoApi = {
   valor: number | string;
   formaPagamento: FormaPagamento;
   dataPagamento?: string | null;
+  registradoPorId: string;
+  confirmadoPorId: string | null;
+  confirmadoEm: string | null;
   informadoPorId?: string | null;
   informadoPorNome?: string | null;
   informadoEm?: string | null;
