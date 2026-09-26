@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useRef } from 'react';
+import { adiantamentosApi } from '../services/adiantamentosApi';
 import {
-  financeService,
   formatCurrency,
   getTodayDateStr,
   formatProfessorNome,
@@ -22,27 +21,38 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { currentUser } = useAuth();
   const [dataPagamento, setDataPagamento] = useState(getTodayDateStr());
   const [formaPagamento, setFormaPagamento] =
     useState<AdiantamentoFormaPagamento>('PIX');
   const [observacao, setObservacao] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const pendingSubmission = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    setIsSubmitting(false);
     if (isOpen) {
       setDataPagamento(getTodayDateStr());
       setFormaPagamento('PIX');
       setObservacao('');
       setError(null);
     }
-  }, [isOpen]);
+    return () => {
+      pendingSubmission.current?.abort();
+      pendingSubmission.current = null;
+    };
+  }, [isOpen, adiantamento?.id]);
 
   if (!isOpen || !adiantamento) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleClose = () => {
+    pendingSubmission.current?.abort();
+    onClose();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || pendingSubmission.current) return;
     setError(null);
 
     if (!dataPagamento) {
@@ -50,31 +60,39 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
       return;
     }
 
+    const controller = new AbortController();
+    pendingSubmission.current = controller;
+    setIsSubmitting(true);
     try {
-      setIsSubmitting(true);
-      financeService.registrarPagamentoAdiantamento(
+      await adiantamentosApi.registrarPagamento(
         adiantamento.id,
         {
           dataPagamento,
           formaPagamento,
-          observacaoPagamento: observacao,
+          observacaoPagamento: observacao.trim() || undefined,
         },
-        currentUser
+        controller.signal
       );
-      onSuccess(formatProfessorNome(adiantamento.professorNome), adiantamento.valor);
-      onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao registrar pagamento do adiantamento.');
+      if (controller.signal.aborted) return;
+    } catch (err: unknown) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return;
+      setError(err instanceof Error ? err.message : 'Erro ao registrar pagamento do adiantamento.');
+      return;
     } finally {
-      setIsSubmitting(false);
+      if (pendingSubmission.current === controller) {
+        pendingSubmission.current = null;
+        if (!controller.signal.aborted) setIsSubmitting(false);
+      }
     }
+    onSuccess(formatProfessorNome(adiantamento.professorNome), adiantamento.valor);
+    onClose();
   };
 
   return (
     <div
       id="admin-pay-advance-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         id="admin-pay-advance-modal"
@@ -99,7 +117,7 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
           <button
             type="button"
             id="btn-close-admin-pay-advance"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
@@ -188,6 +206,7 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
             >
               <option value="PIX">PIX</option>
               <option value="DINHEIRO">Dinheiro</option>
+              <option value="TRANSFERENCIA">Transferência</option>
             </select>
           </div>
 
@@ -218,7 +237,7 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
             <button
               type="button"
               id="btn-cancel-admin-pay-advance"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isSubmitting}
               className="px-4 py-2.5 rounded-xl border border-white/10 text-zinc-300 hover:text-white hover:bg-white/5 text-xs font-bold transition-all disabled:opacity-50"
             >

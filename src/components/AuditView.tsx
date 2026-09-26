@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { adiantamentosApi } from '../services/adiantamentosApi';
 import {
   financeService,
   formatCurrency,
@@ -43,7 +44,27 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
   const triggerRefresh = () => setRefreshTick((prev) => prev + 1);
 
   // Adiantamentos (ADMIN visualiza todos os professores)
-  const todosAdiantamentos = financeService.getAdiantamentosProfessores();
+  const [todosAdiantamentos, setTodosAdiantamentos] = useState<AdiantamentoProfessor[]>([]);
+  const [loadingAdiantamentos, setLoadingAdiantamentos] = useState(true);
+  const [adiantamentosError, setAdiantamentosError] = useState('');
+  const [retryAdiantamentos, setRetryAdiantamentos] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setTodosAdiantamentos([]);
+    setLoadingAdiantamentos(true);
+    setAdiantamentosError('');
+    adiantamentosApi.listAll({}, controller.signal).then((rows) => {
+      if (!controller.signal.aborted) setTodosAdiantamentos(rows);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+      setAdiantamentosError(error instanceof Error ? error.message : 'Erro ao carregar adiantamentos.');
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingAdiantamentos(false);
+    });
+    return () => controller.abort();
+  }, [refreshTick, retryAdiantamentos]);
+
   const solicitadosCount = todosAdiantamentos.filter((a) => a.status === 'SOLICITADO').length;
 
   // Ordenação rígida solicitada:
@@ -65,7 +86,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
     if (orderA !== orderB) {
       return orderA - orderB;
     }
-    return b.dataSolicitacao.localeCompare(a.dataSolicitacao);
+    return b.createdAt.localeCompare(a.createdAt);
   });
 
   // Logs de auditoria
@@ -235,7 +256,14 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
           </div>
 
           {/* Lista de Cards Administrativos */}
-          {adiantamentosOrdenados.length === 0 ? (
+          {loadingAdiantamentos ? (
+            <p role="status" className="p-4 text-xs text-zinc-400">Carregando adiantamentos...</p>
+          ) : adiantamentosError ? (
+            <div role="alert" className="p-3.5 rounded-2xl border border-red-500/20 bg-red-500/10 text-xs text-red-300">
+              {adiantamentosError}{' '}
+              <button type="button" onClick={() => setRetryAdiantamentos((value) => value + 1)} className="underline">Tentar novamente</button>
+            </div>
+          ) : adiantamentosOrdenados.length === 0 ? (
             <div className="p-8 text-center bg-[#18181b] rounded-2xl border border-white/10 space-y-2 text-white">
               <HandCoins className="w-8 h-8 text-zinc-600 mx-auto" />
               <p className="text-sm font-semibold text-zinc-200">
@@ -278,7 +306,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
                             {formatProfessorNome(adiant.professorNome)}
                           </h3>
                           <p className="text-[11px] text-zinc-400 mt-0.5">
-                            Solicitado em {formatDateTimeBR(adiant.dataSolicitacao)}
+                            Solicitado em {formatDateTimeBR(adiant.createdAt)}
                           </p>
                         </div>
                       </div>
@@ -373,7 +401,7 @@ export const AuditView: React.FC<AuditViewProps> = ({ onOpenTeacherPaymentModal 
                         <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">
                           <span className="text-zinc-400">Recibo digital assinado em:</span>
                           <span className="font-bold text-emerald-300">
-                            {formatDateTimeBR(adiant.confirmadoRecebimentoEm || '')}
+                            {formatDateTimeBR(adiant.confirmadoEm || '')}
                           </span>
                         </div>
                         <div className="flex items-center justify-between flex-wrap gap-1 text-[11px]">

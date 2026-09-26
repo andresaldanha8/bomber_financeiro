@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useRef } from 'react';
+import { adiantamentosApi } from '../services/adiantamentosApi';
 import {
-  financeService,
   formatCurrency,
   formatProfessorNome,
 } from '../services/financeService';
@@ -21,41 +20,66 @@ export const AdminRejectAdvanceModal: React.FC<AdminRejectAdvanceModalProps> = (
   onClose,
   onSuccess,
 }) => {
-  const { currentUser } = useAuth();
   const [motivoRecusa, setMotivoRecusa] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const pendingSubmission = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    setIsSubmitting(false);
     if (isOpen) {
       setMotivoRecusa('');
       setError(null);
     }
-  }, [isOpen]);
+    return () => {
+      pendingSubmission.current?.abort();
+      pendingSubmission.current = null;
+    };
+  }, [isOpen, adiantamento?.id]);
 
   if (!isOpen || !adiantamento) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleClose = () => {
+    pendingSubmission.current?.abort();
+    onClose();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || pendingSubmission.current) return;
     setError(null);
 
-    try {
-      setIsSubmitting(true);
-      financeService.recusarAdiantamento(adiantamento.id, motivoRecusa, currentUser);
-      onSuccess(formatProfessorNome(adiantamento.professorNome));
-      onClose();
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao recusar adiantamento.');
-    } finally {
-      setIsSubmitting(false);
+    const motivo = motivoRecusa.trim();
+    if (!motivo) {
+      setError('Informe o motivo da recusa.');
+      return;
     }
+
+    const controller = new AbortController();
+    pendingSubmission.current = controller;
+    setIsSubmitting(true);
+    try {
+      await adiantamentosApi.recusar(adiantamento.id, { motivoRecusa: motivo }, controller.signal);
+      if (controller.signal.aborted) return;
+    } catch (err: unknown) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return;
+      setError(err instanceof Error ? err.message : 'Erro ao recusar adiantamento.');
+      return;
+    } finally {
+      if (pendingSubmission.current === controller) {
+        pendingSubmission.current = null;
+        if (!controller.signal.aborted) setIsSubmitting(false);
+      }
+    }
+    onSuccess(formatProfessorNome(adiantamento.professorNome));
+    onClose();
   };
 
   return (
     <div
       id="admin-reject-advance-modal-backdrop"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
         id="admin-reject-advance-modal"
@@ -80,7 +104,7 @@ export const AdminRejectAdvanceModal: React.FC<AdminRejectAdvanceModalProps> = (
           <button
             type="button"
             id="btn-close-admin-reject-advance"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
@@ -121,17 +145,18 @@ export const AdminRejectAdvanceModal: React.FC<AdminRejectAdvanceModalProps> = (
             )}
           </div>
 
-          {/* Motivo da Recusa (Opcional) */}
+          {/* Motivo da Recusa (Obrigatório) */}
           <div className="space-y-1.5">
             <label
               htmlFor="input-advance-reject-reason"
               className="text-xs font-bold text-zinc-300 flex items-center justify-between"
             >
-              <span>Motivo da Recusa (opcional)</span>
+              <span>Motivo da Recusa (obrigatório)</span>
               <span className="text-[10px] text-zinc-500">Será exibido ao professor</span>
             </label>
             <textarea
               id="input-advance-reject-reason"
+              required
               rows={3}
               placeholder="Ex: Política interna de caixa / data limite para antecipações atingida..."
               value={motivoRecusa}
@@ -155,7 +180,7 @@ export const AdminRejectAdvanceModal: React.FC<AdminRejectAdvanceModalProps> = (
             <button
               type="button"
               id="btn-cancel-admin-reject-advance"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isSubmitting}
               className="px-4 py-2.5 rounded-xl border border-white/10 text-zinc-300 hover:text-white hover:bg-white/5 text-xs font-bold transition-all disabled:opacity-50"
             >
