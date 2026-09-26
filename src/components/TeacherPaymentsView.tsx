@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { repassesApi, type RepasseProfessor, type RepasseFormaPagamento } from '../services/repassesApi';
 import { useAuth } from '../context/AuthContext';
 import {
-  financeService,
   formatCurrency,
   formatDateBR,
   formatDateTimeBR,
@@ -56,6 +55,15 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   const [repassesError, setRepassesError] = useState('');
   const [retryRepasses, setRetryRepasses] = useState(0);
   const pendingConfirmations = useRef(new Map<string, AbortController>());
+  const pendingAdvanceConfirmation = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setConfirmingAdvanceId(null);
+    return () => {
+      pendingAdvanceConfirmation.current?.abort();
+      pendingAdvanceConfirmation.current = null;
+    };
+  }, [currentUser?.id, currentUser?.role]);
 
   useEffect(() => {
     const pending = pendingConfirmations.current;
@@ -166,24 +174,36 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   };
 
   // Handler de confirmação de Adiantamento
-  const handleConfirmarRecebimentoAdiantamento = (adiantamentoId: string) => {
+  const handleConfirmarRecebimentoAdiantamento = async (adiantamentoId: string) => {
+    if (!currentUser || currentUser.role !== 'PROFESSOR') return;
+    const adiantamento = adiantamentos.find((item) => item.id === adiantamentoId);
+    if (!adiantamento || adiantamento.professorId !== currentUser.id ||
+        adiantamento.status !== 'PAGO_AGUARDANDO_CONFIRMACAO' || pendingAdvanceConfirmation.current) return;
+    const controller = new AbortController();
+    pendingAdvanceConfirmation.current = controller;
+    setConfirmingAdvanceId(adiantamentoId);
     try {
-      setConfirmingAdvanceId(adiantamentoId);
-      financeService.confirmarRecebimentoAdiantamento(adiantamentoId, currentUser);
-      triggerLocalRefresh();
+      const confirmado = await adiantamentosApi.confirmReceipt(adiantamentoId, controller.signal);
+      if (controller.signal.aborted) return;
+      setAdiantamentos((rows) => rows.map((item) => item.id === adiantamentoId ? confirmado : item));
       setFeedbackMessage({
         type: 'success',
         text: 'Recebimento de adiantamento confirmado! Recibo digital registrado.',
       });
-      if (onSuccessConfirmation) onSuccessConfirmation();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return;
       setFeedbackMessage({
         type: 'error',
-        text: err?.message || 'Erro ao confirmar recebimento de adiantamento.',
+        text: err instanceof Error ? err.message : 'Erro ao confirmar recebimento de adiantamento.',
       });
+      return;
     } finally {
-      setConfirmingAdvanceId(null);
+      if (pendingAdvanceConfirmation.current === controller) {
+        pendingAdvanceConfirmation.current = null;
+        if (!controller.signal.aborted) setConfirmingAdvanceId(null);
+      }
     }
+    onSuccessConfirmation?.();
   };
 
   const handleAdvanceSuccess = () => {
@@ -637,7 +657,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                           type="button"
                           id={`btn-confirmar-recebimento-adiantamento-${adiant.id}`}
                           onClick={() => handleConfirmarRecebimentoAdiantamento(adiant.id)}
-                          disabled={confirmingAdvanceId === adiant.id}
+                          disabled={confirmingAdvanceId !== null}
                           className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black font-black text-xs shadow-lg shadow-lime-500/20 transition-all active:scale-95 shrink-0 disabled:opacity-50"
                         >
                           <Check className="w-4 h-4 stroke-[3]" />
@@ -654,7 +674,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                       <div className="pt-2 border-t border-white/10 flex items-center gap-1.5 text-lime-400 font-medium text-xs">
                         <FileCheck className="w-4 h-4 text-lime-400 shrink-0" />
                         <span>
-                          Recibo assinado digitalmente em {formatDateTimeBR(adiant.confirmadoRecebimentoEm || '')}
+                          Recibo assinado digitalmente em {formatDateTimeBR(adiant.confirmadoEm || '')}
                         </span>
                       </div>
                     )}

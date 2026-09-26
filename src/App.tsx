@@ -21,6 +21,7 @@ import { ToastContainer, ToastMessage } from './components/Toast';
 import { Aluno, FormaPagamento, Mensalidade, PagamentoAluno } from './types';
 import { financeService } from './services/financeService';
 import { repassesApi } from './services/repassesApi';
+import { adiantamentosApi } from './services/adiantamentosApi';
 
 // Abas permitidas por perfil
 const ADMIN_ALLOWED_TABS: TabType[] = [
@@ -54,9 +55,12 @@ function MainContent() {
     setBadgeRepasses(null);
     if (!isLoading && isAuthenticated && currentUser?.role === 'PROFESSOR') {
       const userId = currentUser.id;
-      repassesApi.listAll({ status: 'AGUARDANDO_RECEBIMENTO' }, controller.signal)
-        .then((rows) => {
-          if (!controller.signal.aborted) setBadgeRepasses({ userId, refresh: refreshKey, count: rows.length });
+      Promise.all([
+        repassesApi.listAll({ status: 'AGUARDANDO_RECEBIMENTO' }, controller.signal),
+        adiantamentosApi.listAll({ status: 'PAGO_AGUARDANDO_CONFIRMACAO' }, controller.signal),
+      ])
+        .then(([repasses, adiantamentos]) => {
+          if (!controller.signal.aborted) setBadgeRepasses({ userId, refresh: refreshKey, count: repasses.length + adiantamentos.length });
         })
         .catch(() => {
           // Contagem indisponível: ocultar o badge, sem recorrer ao legado.
