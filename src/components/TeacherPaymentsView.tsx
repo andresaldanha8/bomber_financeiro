@@ -8,6 +8,8 @@ import {
   formatDateTimeBR,
   formatProfessorNome,
 } from '../services/financeService';
+import { adiantamentosApi } from '../services/adiantamentosApi';
+import type { AdiantamentoProfessor } from '../types';
 import {
   Wallet,
   CheckCircle2,
@@ -95,9 +97,30 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
   const triggerLocalRefresh = () => setRefreshTick((prev) => prev + 1);
 
   // Professor só carrega ESTRITAMENTE seus próprios adiantamentos
-  const adiantamentos = isAdmin
-    ? []
-    : financeService.getAdiantamentosProfessores(currentUser.id);
+  const [adiantamentos, setAdiantamentos] = useState<AdiantamentoProfessor[]>([]);
+  const [loadingAdiantamentos, setLoadingAdiantamentos] = useState(true);
+  const [adiantamentosError, setAdiantamentosError] = useState('');
+  const [retryAdiantamentos, setRetryAdiantamentos] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setAdiantamentos([]);
+    setAdiantamentosError('');
+    setLoadingAdiantamentos(true);
+    if (!isAdmin && currentUser) {
+      adiantamentosApi.listAll({}, controller.signal).then((rows) => {
+        if (!controller.signal.aborted) setAdiantamentos(rows);
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        setAdiantamentosError(error instanceof Error ? error.message : 'Erro ao carregar adiantamentos.');
+      }).finally(() => {
+        if (!controller.signal.aborted) setLoadingAdiantamentos(false);
+      });
+    } else {
+      setLoadingAdiantamentos(false);
+    }
+    return () => controller.abort();
+  }, [currentUser?.id, currentUser?.role, refreshTick, retryAdiantamentos]);
 
   // Contadores para badges discretos
   const repassesPendentes = pagamentos.filter(
@@ -169,7 +192,6 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
       type: 'success',
       text: 'Solicitação de adiantamento enviada para análise da administração!',
     });
-    if (onSuccessConfirmation) onSuccessConfirmation();
   };
 
   return (
@@ -458,7 +480,13 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
           </div>
 
           {/* Lista de Adiantamentos */}
-          {adiantamentos.length === 0 ? (
+          {loadingAdiantamentos ? (
+            <p role="status" className="p-4 text-xs text-zinc-400">Carregando adiantamentos...</p>
+          ) : adiantamentosError ? (
+            <div role="alert" className="p-3.5 rounded-2xl border border-red-500/20 bg-red-500/10 text-xs text-red-300">
+              {adiantamentosError} <button type="button" onClick={() => setRetryAdiantamentos((v) => v + 1)} className="underline">Tentar novamente</button>
+            </div>
+          ) : adiantamentos.length === 0 ? (
             <div
               id="empty-state-adiantamentos"
               className="p-8 text-center bg-[#18181b] rounded-2xl border border-white/10 space-y-3 text-white"
@@ -498,7 +526,7 @@ export const TeacherPaymentsView: React.FC<TeacherPaymentsViewProps> = ({
                           {formatCurrency(adiant.valor)}
                         </span>
                         <p className="text-xs text-zinc-400 mt-0.5">
-                          Solicitado em {formatDateBR(adiant.dataSolicitacao)}
+                          Solicitado em {formatDateBR(adiant.createdAt)}
                         </p>
                       </div>
 

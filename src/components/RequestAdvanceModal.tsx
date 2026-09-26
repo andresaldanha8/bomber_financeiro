@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { financeService, formatProfessorNome } from '../services/financeService';
+import { formatProfessorNome } from '../services/financeService';
+import { adiantamentosApi } from '../services/adiantamentosApi';
 import { X, HandCoins, AlertCircle } from 'lucide-react';
 
 interface RequestAdvanceModalProps {
@@ -20,9 +21,17 @@ export const RequestAdvanceModal: React.FC<RequestAdvanceModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen) return null;
+  const controllerRef = React.useRef<AbortController | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  React.useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+    };
+  }, []);
+
+  if (!isOpen || !currentUser) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -34,17 +43,24 @@ export const RequestAdvanceModal: React.FC<RequestAdvanceModalProps> = ({
       return;
     }
 
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
     try {
       setIsSubmitting(true);
-      financeService.solicitarAdiantamento(valorNum, motivo, currentUser);
+      await adiantamentosApi.create({ valor: valorNum, motivo: motivo || undefined }, controller.signal);
+      if (controller.signal.aborted) return;
       onSuccess();
       onClose();
       setValorStr('');
       setMotivo('');
     } catch (err: any) {
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return;
       setError(err?.message || 'Erro ao enviar solicitação de adiantamento.');
     } finally {
       setIsSubmitting(false);
+      controllerRef.current = null;
     }
   };
 

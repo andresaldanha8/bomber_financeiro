@@ -1,4 +1,5 @@
 import {
+  AdiantamentoFormaPagamento,
   AdiantamentoProfessor,
   Aluno,
   AlunoStatus,
@@ -53,6 +54,7 @@ export const INITIAL_ADIANTAMENTOS_PROFESSORES: AdiantamentoProfessor[] = [
     professorNome: 'Prof. Marcos Andrade',
     valor: 300.0,
     dataSolicitacao: '2026-09-08T14:30:00.000Z',
+    createdAt: '2026-09-08T14:30:00.000Z',
     motivo: 'Adiantamento quinzenal de aulas',
     status: 'CONFIRMADO',
     dataPagamento: '2026-09-09',
@@ -1694,12 +1696,15 @@ class FinanceService {
       throw new Error('Usuário não autenticado.');
     }
 
+    const agoraIso = new Date().toISOString();
+
     const novo: AdiantamentoProfessor = {
       id: `adiant-${Date.now().toString().slice(-8)}`,
       professorId: professorLogado.id,
       professorNome: formatProfessorNome(professorLogado.name),
       valor,
-      dataSolicitacao: new Date().toISOString(),
+      dataSolicitacao: agoraIso,
+      createdAt: agoraIso,
       motivo: motivo?.trim() || undefined,
       status: 'SOLICITADO',
     };
@@ -1780,7 +1785,7 @@ class FinanceService {
     id: string,
     dados: {
       dataPagamento: string;
-      formaPagamento: string;
+      formaPagamento: AdiantamentoFormaPagamento;
       observacaoPagamento?: string;
     },
     adminLogado: User

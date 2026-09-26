@@ -6,7 +6,7 @@ import {
   getTodayDateStr,
   formatProfessorNome,
 } from '../services/financeService';
-import { AdiantamentoProfessor } from '../types';
+import { AdiantamentoProfessor, AdiantamentoFormaPagamento } from '../types';
 import { X, CheckCircle, AlertCircle, Calendar, CreditCard, User, FileText } from 'lucide-react';
 
 interface AdminPayAdvanceModalProps {
@@ -24,7 +24,8 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
 }) => {
   const { currentUser } = useAuth();
   const [dataPagamento, setDataPagamento] = useState(getTodayDateStr());
-  const [formaPagamento, setFormaPagamento] = useState('PIX');
+  const [formaPagamento, setFormaPagamento] =
+    useState<AdiantamentoFormaPagamento>('PIX');
   const [observacao, setObservacao] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -180,7 +181,9 @@ export const AdminPayAdvanceModal: React.FC<AdminPayAdvanceModalProps> = ({
             <select
               id="select-advance-payment-method"
               value={formaPagamento}
-              onChange={(e) => setFormaPagamento(e.target.value)}
+              onChange={(e) =>
+                setFormaPagamento(e.target.value as AdiantamentoFormaPagamento)
+              }
               className="w-full px-3.5 py-2.5 rounded-2xl bg-[#18181b] border border-white/10 text-xs text-white focus:outline-none focus:ring-2 focus:ring-lime-400"
             >
               <option value="PIX">PIX</option>
