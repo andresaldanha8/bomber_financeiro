@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
-  financeService,
   formatCurrency,
   formatDateBR,
   getFutureDateStr,
   getTodayDateStr,
 } from '../services/financeService';
-import { PagamentoAluno } from '../types';
+import { queryMensalidades, MensalidadeApi } from '../services/mensalidadesApi';
+import { getStudents } from '../services/studentsApi';
+import pagamentosApi from '../services/pagamentosApi';
+import { PagamentoAluno, Aluno } from '../types';
 import { CashMovement, CashSummary, getCashMovements, getCashSummary } from '../services/caixaApi';
 import {
   DollarSign,
@@ -46,17 +48,136 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateTab,
   onOpenExtratoCaixa,
 }) => {
-  // Somente indicadores de alunos permanecem legados; não consultar movimentos locais.
-  const mensalidades = financeService.getMensalidades();
-  const alunos = financeService.getAlunos();
-  const hoje = getTodayDateStr();
-  const elegiveis = mensalidades.filter((m) => alunos.some((a) => a.id === m.alunoId && a.status === 'ATIVO') && !financeService.isPagamentoInicialPendente(m.alunoId));
-  const stats = {
-    totalAguardandoConfirmacao: mensalidades.filter((m) => m.status === 'AGUARDANDO_CONFIRMACAO').length,
-    totalAtrasados: elegiveis.filter((m) => m.status === 'ATRASADA' || (m.status === 'PENDENTE' && m.dataVencimento < hoje)).length,
-    totalVencemSemana: elegiveis.filter((m) => m.status === 'PENDENTE' && m.dataVencimento >= hoje && m.dataVencimento <= getFutureDateStr(7)).length,
-  };
-  const pagamentosPendentes = financeService.getPagamentosAguardandoConfirmacao();
+  // Indicadores agora baseados em APIs PostgreSQL (mensalidades + students + pagamentos)
+  const [mensalidades, setMensalidades] = useState<MensalidadeApi[]>([]);
+  const [alunos, setAlunos] = useState<Aluno[]>([]);
+  const [stats, setStats] = useState({ totalAguardandoConfirmacao: 0, totalAtrasados: 0, totalVencemSemana: 0 });
+  const [pagamentosPendentes, setPagamentosPendentes] = useState<PagamentoAluno[]>([]);
+  const [loadingIndicators, setLoadingIndicators] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setLoadingIndicators(true);
+    // Buscar mensalidades, alunos e pagamentos aguardando em paralelo
+    Promise.all([
+      queryMensalidades(),
+      getStudents(),
+      pagamentosApi.getPayments({ statusConfirmacao: 'AGUARDANDO' }),
+    ])
+      .then(([menss, studs, pagos]) => {
+        if (!active) return;
+        setMensalidades(menss || []);
+        setAlunos(studs || []);
+
+        // indexar por studentId e por mensalidadeId para operações rápidas
+        const mensalidadesByStudent: Record<string, MensalidadeApi[]> = {};
+        const mensalidadeById: Record<string, MensalidadeApi> = {};
+        for (const m of menss) {
+          mensalidadeById[m.id] = m;
+          const sid = m.studentId;
+          if (!mensalidadesByStudent[sid]) mensalidadesByStudent[sid] = [];
+          mensalidadesByStudent[sid].push(m);
+        }
+
+        const studentsMap: Record<string, Aluno> = {};
+        for (const s of studs) studentsMap[s.id] = s;
+
+        // helper: encontrar mensalidade atual do aluno (mesma semântica do legacy)
+        const getMensalidadeAtual = (arr: MensalidadeApi[] | undefined) => {
+          if (!arr || arr.length === 0) return undefined;
+          const emAberto = arr.find((m) => ['ATRASADA', 'PENDENTE', 'AGUARDANDO_CONFIRMACAO'].includes(m.status));
+          if (emAberto) return emAberto;
+          return arr[0];
+        };
+
+        const isPagamentoInicialPendente = (studentId: string) => {
+          const mens = mensalidadesByStudent[studentId] || [];
+          if (mens.length === 0) return false;
+          if (mens.some((m) => m.status === 'QUITADA')) return false;
+          if (mens.some((m) => m.status === 'AGUARDANDO_CONFIRMACAO')) return false;
+          const atual = getMensalidadeAtual(mens);
+          return !!atual && (atual.status === 'PENDENTE' || atual.status === 'ATRASADA');
+        };
+
+        const hoje = getTodayDateStr();
+        const futuro7 = getFutureDateStr(7);
+
+        // totalAguardandoConfirmacao: conta todas as mensalidades com status AGUARDANDO_CONFIRMACAO
+        const totalAguardandoConfirmacao = menss.filter((m) => m.status === 'AGUARDANDO_CONFIRMACAO').length;
+
+        // elegiveis: mensalidades cujo aluno está ATIVO e que não sejam pagamento inicial pendente
+        const elegiveis = menss.filter((m) => {
+          const aluno = studentsMap[m.studentId];
+          if (!aluno || aluno.status !== 'ATIVO') return false;
+          if (isPagamentoInicialPendente(m.studentId)) return false;
+          return true;
+        });
+
+        const totalAtrasados = elegiveis.filter((m) => m.status === 'ATRASADA' || (m.status === 'PENDENTE' && m.dataVencimento < hoje)).length;
+        const totalVencemSemana = elegiveis.filter((m) => m.status === 'PENDENTE' && m.dataVencimento >= hoje && m.dataVencimento <= futuro7).length;
+
+        setStats({ totalAguardandoConfirmacao, totalAtrasados, totalVencemSemana });
+
+        // enriquecer pagamentos pendentes com dados já carregados
+        const pagamentosMap: PagamentoAluno[] = [];
+        for (const p of (pagos || [])) {
+          const men = mensalidadeById[p.mensalidadeId];
+          if (!men) {
+            console.warn(`Pagamento ${p.id} sem mensalidade relacionada: será ignorado na Dashboard.`);
+            continue;
+          }
+          const aluno = studentsMap[men.studentId];
+          if (!aluno) {
+            console.warn(`Pagamento ${p.id} tem mensalidade ${men.id} mas aluno ${men.studentId} não encontrado.`);
+          }
+
+          const statusMap = (s?: string) => {
+            if (s === 'AGUARDANDO') return 'AGUARDANDO_CONFIRMACAO' as const;
+            if (s === 'CONFIRMADO') return 'CONFIRMADO' as const;
+            return 'AGUARDANDO_CONFIRMACAO' as const;
+          };
+
+          const pagamentoAluno: PagamentoAluno = {
+            id: p.id,
+            mensalidadeId: p.mensalidadeId,
+            alunoId: men.studentId,
+            alunoNome: aluno ? aluno.nome : (p.informadoPorNome ?? '—'),
+            valor: typeof p.valor === 'string' ? Number(p.valor) : (p.valor ?? 0),
+            formaPagamento: p.formaPagamento,
+            competencia: men.competencia,
+            dataPagamento: p.dataPagamento ?? undefined,
+            dataVencimento: men.dataVencimento ?? undefined,
+            informadoPorId: p.informadoPorId ?? p.registradoPorId ?? '',
+            informadoPorNome: p.informadoPorNome ?? p.registradoPorId ?? '',
+            informadoEm: p.informadoEm ?? new Date().toISOString(),
+            createdAt: undefined,
+            statusConfirmacao: statusMap(p.statusConfirmacao),
+          };
+
+          pagamentosMap.push(pagamentoAluno);
+        }
+
+        setPagamentosPendentes(pagamentosMap);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error('Erro ao carregar indicadores do AdminDashboard:', err);
+        // Fallback seguros: manter zeros e lista vazia
+        setMensalidades([]);
+        setAlunos([]);
+        setStats({ totalAguardandoConfirmacao: 0, totalAtrasados: 0, totalVencemSemana: 0 });
+        setPagamentosPendentes([]);
+      })
+      .finally(() => {
+        if (active) setLoadingIndicators(false);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [/* remount triggers from parent key */]);
   const [summary, setSummary] = useState<CashSummary | null>(null);
   const [ultimasMovimentacoes, setUltimasMovimentacoes] = useState<CashMovement[]>([]);
   const [cashError, setCashError] = useState('');

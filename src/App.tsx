@@ -22,6 +22,7 @@ import { Aluno, FormaPagamento, Mensalidade, PagamentoAluno } from './types';
 import { financeService } from './services/financeService';
 import { repassesApi } from './services/repassesApi';
 import { adiantamentosApi } from './services/adiantamentosApi';
+import pagamentosApi from './services/pagamentosApi';
 
 // Abas permitidas por perfil
 const ADMIN_ALLOWED_TABS: TabType[] = [
@@ -69,6 +70,28 @@ function MainContent() {
     }
     return () => controller.abort();
   }, [currentUser?.id, currentUser?.role, isAuthenticated, isLoading, refreshKey]);
+
+  // Badge global de pagamentos aguardando confirmação (fonte: API PostgreSQL)
+  const [pagamentosAguardando, setPagamentosAguardando] = useState<number>(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    // manter fallback inicial em 0 enquanto carrega
+    setPagamentosAguardando(0);
+    if (!isLoading && isAuthenticated && currentUser?.role === 'ADMIN') {
+      pagamentosApi
+        .getPayments({ statusConfirmacao: 'AGUARDANDO' })
+        .then((rows) => {
+          if (!controller.signal.aborted) setPagamentosAguardando(rows.length);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          // não recorrer ao localStorage; mostrar 0 e registrar erro sem quebrar a UI
+          console.error('Erro ao obter pagamentos aguardando:', err);
+          setPagamentosAguardando(0);
+        });
+    }
+    return () => controller.abort();
+  }, [isLoading, isAuthenticated, currentUser?.role, refreshKey]);
 
   // Validação em tempo real: verifica se a aba ativa é permitida para o perfil atual
   const isTabAllowed = isAdmin
@@ -143,7 +166,7 @@ if (!isAuthenticated || !currentUser) {
 }
 
   // Contadores de Badges
-  const pagamentosAguardando = financeService.getPagamentosAguardandoConfirmacao().length;
+  // A contagem global de pagamentos aguardando agora vem da API PostgreSQL.
   // O zero apenas oculta o badge enquanto a contagem está indisponível.
   const meusPagamentosPendentes = currentUser.role === 'PROFESSOR' &&
     badgeRepasses?.userId === currentUser.id && badgeRepasses.refresh === refreshKey
