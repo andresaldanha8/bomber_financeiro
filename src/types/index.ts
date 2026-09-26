@@ -135,8 +135,7 @@ export type StatusAdiantamento =
 export type AdiantamentoFormaPagamento = 'PIX' | 'DINHEIRO' | 'TRANSFERENCIA';
 
 /**
- * Tipo oficial alinhado ao serializer PostgreSQL. Campos legados são preservados
- * (opcionais) para compatibilidade temporária com componentes ainda não migrados.
+ * Tipo oficial alinhado ao serializer PostgreSQL.
  */
 export interface AdiantamentoProfessor {
   id: string;
@@ -164,11 +163,6 @@ export interface AdiantamentoProfessor {
   confirmadoPorId?: string | null;
   confirmadoPorNome?: string | null;
   confirmadoEm?: string | null; // ISO
-
-  // Campos legados mantidos temporariamente para evitar que a UI quebre.
-  // Serão removidos na RDD-002.7.4.5 após migrar todos os consumidores.
-  dataSolicitacao?: string; // LEGACY: ISO string
-  confirmadoRecebimentoEm?: string; // LEGACY: ISO string
 }
 
 export type TipoMovimentacaoCaixa = 'ENTRADA' | 'SAIDA';
@@ -266,9 +260,6 @@ export interface DetalhesMovimentacaoCaixa {
   registradoPorProfessor?: string;
   reciboConfirmadoPeloProfessor?: boolean;
   dataConfirmacaoRecebimentoProfessor?: string;
-  dataRegistroAdiantamento?: string;
-  motivoAdiantamento?: string;
-  statusReciboAdiantamento?: string;
 }
 
 export interface CicloMensalCaixa {
@@ -303,4 +294,3 @@ export interface ResumoFinanceiroMensal {
   resultadoOperacional: number;
   saldoFinal: number;
 }
-

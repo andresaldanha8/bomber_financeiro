@@ -74,7 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div id="admin-dashboard-view" className="space-y-4 pb-20">
-      <p className="text-xs text-zinc-400">Os repasses registrados neste fluxo compõem o Caixa oficial. Adiantamentos legados não estão incluídos.</p>
+      <p className="text-xs text-zinc-400">Repasses e adiantamentos pagos pelo fluxo oficial integram o Caixa PostgreSQL.</p>
       {cashError && <p role="alert" className="text-sm text-red-400">{cashError} <button type="button" onClick={() => setRetry((value) => value + 1)} className="underline">Tentar novamente</button></p>}
       {/* Bloco 1: Caixa Atual & KPIs Financeiros */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

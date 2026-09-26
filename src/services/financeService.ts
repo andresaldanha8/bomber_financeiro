@@ -1,6 +1,4 @@
 import {
-  AdiantamentoFormaPagamento,
-  AdiantamentoProfessor,
   Aluno,
   AlunoStatus,
   AuditoriaLog,
@@ -18,7 +16,6 @@ import {
   PagamentoProfessor,
   Plano,
   ResumoFinanceiroMensal,
-  StatusAdiantamento,
   User,
 } from '../types';
 
@@ -42,29 +39,9 @@ const STORAGE_KEYS = {
   PAGAMENTOS_ALUNOS: 'bomber_pagamentos_alunos',
   DESPESAS: 'bomber_despesas',
   PAGAMENTOS_PROFESSORES: 'bomber_pagamentos_professores',
-  ADIANTAMENTOS_PROFESSORES: 'bomber_adiantamentos_professores',
   MOVIMENTACOES_CAIXA: 'bomber_movimentacoes_caixa',
   AUDITORIA: 'bomber_auditoria',
 };
-
-export const INITIAL_ADIANTAMENTOS_PROFESSORES: AdiantamentoProfessor[] = [
-  {
-    id: 'adiant-marcos-300',
-    professorId: 'usr-prof-1',
-    professorNome: 'Prof. Marcos Andrade',
-    valor: 300.0,
-    dataSolicitacao: '2026-09-08T14:30:00.000Z',
-    createdAt: '2026-09-08T14:30:00.000Z',
-    motivo: 'Adiantamento quinzenal de aulas',
-    status: 'CONFIRMADO',
-    dataPagamento: '2026-09-09',
-    formaPagamento: 'PIX',
-    observacaoPagamento: 'Adiantamento quinzenal pago via PIX',
-    registradoPorNome: 'Carlos Ferreira',
-    pagoEm: '2026-09-09T10:00:00.000Z',
-    confirmadoRecebimentoEm: '2026-09-09T10:15:00.000Z',
-  },
-];
 
 /**
  * Normaliza a apresentação do nome do professor para evitar duplicação do prefixo "Prof." ou "Profa.".
@@ -333,7 +310,6 @@ class FinanceService {
     setStoredItem(STORAGE_KEYS.PAGAMENTOS_ALUNOS, INITIAL_PAGAMENTOS_ALUNOS);
     setStoredItem(STORAGE_KEYS.DESPESAS, INITIAL_DESPESAS);
     setStoredItem(STORAGE_KEYS.PAGAMENTOS_PROFESSORES, INITIAL_PAGAMENTOS_PROFESSORES);
-    setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, INITIAL_ADIANTAMENTOS_PROFESSORES);
     setStoredItem(STORAGE_KEYS.MOVIMENTACOES_CAIXA, INITIAL_MOVIMENTACOES_CAIXA);
     setStoredItem(STORAGE_KEYS.AUDITORIA, INITIAL_AUDITORIA);
   }
@@ -1628,298 +1604,6 @@ class FinanceService {
     );
   }
 
-  // ==========================================
-  // ADIANTAMENTOS A PROFESSORES (ENTIDADE SEPARADA)
-  // ==========================================
-
-  public getAdiantamentosProfessores(professorId?: string): AdiantamentoProfessor[] {
-    let list = getStoredItem<AdiantamentoProfessor[]>(
-      STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES,
-      INITIAL_ADIANTAMENTOS_PROFESSORES
-    );
-
-    let modified = false;
-    list = list.map((a) => {
-      if (a.professorId === 'usr-prof-2' && a.professorNome !== 'Prof. Kawan Duarte') {
-        modified = true;
-        return { ...a, professorNome: 'Prof. Kawan Duarte' };
-      }
-      if (a.professorId === 'usr-prof-3' && a.professorNome !== 'Prof. Ryan Duarte') {
-        modified = true;
-        return { ...a, professorNome: 'Prof. Ryan Duarte' };
-      }
-      if (a.professorNome && a.professorNome.startsWith('Prof. Prof.')) {
-        modified = true;
-        return { ...a, professorNome: formatProfessorNome(a.professorNome) };
-      }
-      return a;
-    });
-
-    if (modified) {
-      setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, list);
-    }
-
-    let filtered = list;
-    if (professorId) {
-      filtered = list.filter((a) => a.professorId === professorId);
-    }
-
-    // Ordenação: 1. SOLICITADO, 2. PAGO_AGUARDANDO_CONFIRMACAO, 3. CONFIRMADO, 4. RECUSADO. Mais recentes primeiro.
-    const pesosStatus: Record<StatusAdiantamento, number> = {
-      SOLICITADO: 1,
-      PAGO_AGUARDANDO_CONFIRMACAO: 2,
-      CONFIRMADO: 3,
-      RECUSADO: 4,
-    };
-
-    return filtered.sort((a, b) => {
-      const pesoA = pesosStatus[a.status] || 99;
-      const pesoB = pesosStatus[b.status] || 99;
-      if (pesoA !== pesoB) return pesoA - pesoB;
-      return b.dataSolicitacao.localeCompare(a.dataSolicitacao);
-    });
-  }
-
-  public getAdiantamentoById(id: string): AdiantamentoProfessor | undefined {
-    return this.getAdiantamentosProfessores().find((a) => a.id === id);
-  }
-
-  public solicitarAdiantamento(
-    valor: number,
-    motivo: string | undefined,
-    professorLogado: User
-  ): AdiantamentoProfessor {
-    if (!valor || valor <= 0) {
-      throw new Error('Informe um valor válido para o adiantamento (maior que zero).');
-    }
-    if (!professorLogado || !professorLogado.id) {
-      throw new Error('Usuário não autenticado.');
-    }
-
-    const agoraIso = new Date().toISOString();
-
-    const novo: AdiantamentoProfessor = {
-      id: `adiant-${Date.now().toString().slice(-8)}`,
-      professorId: professorLogado.id,
-      professorNome: formatProfessorNome(professorLogado.name),
-      valor,
-      dataSolicitacao: agoraIso,
-      createdAt: agoraIso,
-      motivo: motivo?.trim() || undefined,
-      status: 'SOLICITADO',
-    };
-
-    const lista = getStoredItem<AdiantamentoProfessor[]>(
-      STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES,
-      []
-    );
-    lista.unshift(novo);
-    setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, lista);
-
-    // Auditoria (SOLICITAÇÃO: Professor solicitou adiantamento)
-    // Preservar: usuário, data/hora, entidade, referência, detalhes.
-    // ZERO impacto no Caixa nessa etapa.
-    this.registrarAuditoria(
-      'Solicitação de Adiantamento',
-      'ADIANTAMENTO_PROFESSOR',
-      novo.id,
-      `${formatProfessorNome(professorLogado.name)} solicitou adiantamento de ${formatCurrency(novo.valor)}${
-        novo.motivo ? `. Motivo: "${novo.motivo}"` : ''
-      }. Aguardando análise da administração.`,
-      professorLogado
-    );
-
-    return novo;
-  }
-
-  public recusarAdiantamento(
-    id: string,
-    motivoRecusa: string | undefined,
-    adminLogado: User
-  ): AdiantamentoProfessor {
-    if (adminLogado.role !== 'ADMIN') {
-      throw new Error('Apenas administradores podem analisar solicitações de adiantamento.');
-    }
-
-    const lista = getStoredItem<AdiantamentoProfessor[]>(
-      STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES,
-      []
-    );
-    const idx = lista.findIndex((a) => a.id === id);
-    if (idx === -1) {
-      throw new Error('Solicitação de adiantamento não encontrada.');
-    }
-
-    const adiant = lista[idx];
-    if (adiant.status !== 'SOLICITADO') {
-      throw new Error(`Esta solicitação já foi processada anteriormente (${adiant.status}).`);
-    }
-
-    adiant.status = 'RECUSADO';
-    adiant.analisadoPorId = adminLogado.id;
-    adiant.analisadoPorNome = adminLogado.name;
-    adiant.analisadoEm = new Date().toISOString();
-    adiant.motivoRecusa = motivoRecusa?.trim() || undefined;
-
-    lista[idx] = adiant;
-    setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, lista);
-
-    // Auditoria (RECUSA: Admin recusou solicitação)
-    // ZERO impacto no Caixa
-    this.registrarAuditoria(
-      'Recusa de Adiantamento',
-      'ADIANTAMENTO_PROFESSOR',
-      adiant.id,
-      `ADMIN ${adminLogado.name} recusou a solicitação de adiantamento de ${formatCurrency(
-        adiant.valor
-      )} de ${adiant.professorNome}${
-        adiant.motivoRecusa ? `. Motivo informado: "${adiant.motivoRecusa}"` : ''
-      }.`,
-      adminLogado
-    );
-
-    return adiant;
-  }
-
-  public registrarPagamentoAdiantamento(
-    id: string,
-    dados: {
-      dataPagamento: string;
-      formaPagamento: AdiantamentoFormaPagamento;
-      observacaoPagamento?: string;
-    },
-    adminLogado: User
-  ): AdiantamentoProfessor {
-    if (adminLogado.role !== 'ADMIN') {
-      throw new Error('Apenas administradores podem registrar pagamento de adiantamento.');
-    }
-
-    const lista = getStoredItem<AdiantamentoProfessor[]>(
-      STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES,
-      []
-    );
-    const idx = lista.findIndex((a) => a.id === id);
-    if (idx === -1) {
-      throw new Error('Solicitação de adiantamento não encontrada.');
-    }
-
-    const adiant = lista[idx];
-    if (adiant.status !== 'SOLICITADO') {
-      throw new Error(`Esta solicitação não está mais pendente de análise (${adiant.status}).`);
-    }
-
-    // IDEMPOTÊNCIA: verificar se já existe saída no caixa para esta referência
-    const movimentacoesExistentes = this.getMovimentacoesCaixa();
-    const jaExisteMov = movimentacoesExistentes.some(
-      (m) => m.origem === 'ADIANTAMENTO_PROFESSOR' && m.referenciaId === adiant.id
-    );
-    if (jaExisteMov) {
-      throw new Error('Pagamento deste adiantamento já foi lançado anteriormente no Caixa.');
-    }
-
-    const agoraIso = new Date().toISOString();
-
-    adiant.status = 'PAGO_AGUARDANDO_CONFIRMACAO';
-    adiant.analisadoPorId = adminLogado.id;
-    adiant.analisadoPorNome = adminLogado.name;
-    adiant.analisadoEm = agoraIso;
-    adiant.dataPagamento = dados.dataPagamento;
-    adiant.formaPagamento = dados.formaPagamento;
-    adiant.registradoPorId = adminLogado.id;
-    adiant.registradoPorNome = adminLogado.name;
-    adiant.pagoEm = agoraIso;
-    adiant.observacaoPagamento = dados.observacaoPagamento?.trim() || undefined;
-
-    lista[idx] = adiant;
-    setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, lista);
-
-    // IMPACTO NO CAIXA: Criar EXATAMENTE UMA movimentação de SAIDA
-    const movimentacoes = getStoredItem<MovimentacaoCaixa[]>(
-      STORAGE_KEYS.MOVIMENTACOES_CAIXA,
-      INITIAL_MOVIMENTACOES_CAIXA
-    );
-    const saidaCaixa: MovimentacaoCaixa = {
-      id: `mov-${Date.now().toString().slice(-6)}`,
-      tipo: 'SAIDA',
-      origem: 'ADIANTAMENTO_PROFESSOR',
-      referenciaId: adiant.id,
-      descricao: `Adiantamento ${formatProfessorNome(adiant.professorNome)}`,
-      valor: adiant.valor,
-      dataHora: `${dados.dataPagamento}T12:00:00Z`,
-      registradoPorNome: adminLogado.name,
-    };
-    movimentacoes.unshift(saidaCaixa);
-    setStoredItem(STORAGE_KEYS.MOVIMENTACOES_CAIXA, movimentacoes);
-
-    // Auditoria (PAGAMENTO: Admin registrou pagamento do adiantamento)
-    this.registrarAuditoria(
-      'Registro de Pagamento de Adiantamento',
-      'ADIANTAMENTO_PROFESSOR',
-      adiant.id,
-      `ADMIN ${adminLogado.name} registrou pagamento de adiantamento de ${formatCurrency(
-        adiant.valor
-      )} para ${formatProfessorNome(adiant.professorNome)} via ${dados.formaPagamento}. Saída gerada no Caixa.`,
-      adminLogado
-    );
-
-    return adiant;
-  }
-
-  public confirmarRecebimentoAdiantamento(
-    id: string,
-    professorLogado: User
-  ): AdiantamentoProfessor {
-    const lista = getStoredItem<AdiantamentoProfessor[]>(
-      STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES,
-      []
-    );
-    const idx = lista.findIndex((a) => a.id === id);
-    if (idx === -1) {
-      throw new Error('Registro de adiantamento não encontrado.');
-    }
-
-    const adiant = lista[idx];
-    if (adiant.professorId !== professorLogado.id && professorLogado.role !== 'ADMIN') {
-      throw new Error('Você só pode confirmar adiantamentos solicitados por você.');
-    }
-
-    if (adiant.status !== 'PAGO_AGUARDANDO_CONFIRMACAO') {
-      throw new Error('Este adiantamento não está aguardando confirmação.');
-    }
-
-    const agoraIso = new Date().toISOString();
-    adiant.status = 'CONFIRMADO';
-    adiant.confirmadoRecebimentoEm = agoraIso;
-
-    lista[idx] = adiant;
-    setStoredItem(STORAGE_KEYS.ADIANTAMENTOS_PROFESSORES, lista);
-
-    // IMPORTANTE: NÃO gerar movimentação financeira nessa etapa. É apenas recibo digital.
-
-    // Auditoria (CONFIRMAÇÃO: Professor confirmou recebimento)
-    this.registrarAuditoria(
-      'Recibo Digital de Adiantamento',
-      'ADIANTAMENTO_PROFESSOR',
-      adiant.id,
-      `${formatProfessorNome(professorLogado.name)} confirmou o recebimento de adiantamento de ${formatCurrency(
-        adiant.valor
-      )} (${adiant.formaPagamento || 'PIX'}). Recibo digital emitido.`,
-      professorLogado
-    );
-
-    return adiant;
-  }
-
-  public getAdiantamentosSolicitadosCount(): number {
-    return this.getAdiantamentosProfessores().filter((a) => a.status === 'SOLICITADO').length;
-  }
-
-  public getMeusAdiantamentosPendentesConfirmacaoCount(professorId: string): number {
-    return this.getAdiantamentosProfessores(professorId).filter(
-      (a) => a.status === 'PAGO_AGUARDANDO_CONFIRMACAO'
-    ).length;
-  }
-
   // Caixa e Auditoria (ADMIN)
   public getMovimentacoesCaixa(tipo?: 'TODAS' | 'ENTRADA' | 'SAIDA'): MovimentacaoCaixa[] {
     let list = getStoredItem<MovimentacaoCaixa[]>(
@@ -2064,38 +1748,6 @@ class FinanceService {
           referenciaCodigo: pagProf.id,
         };
       }
-    } else if (mov.origem === 'ADIANTAMENTO_PROFESSOR') {
-      const adiantamentos = this.getAdiantamentosProfessores();
-      const adiant = adiantamentos.find((a) => a.id === mov.referenciaId);
-      if (adiant) {
-        return {
-          movimentacao: mov,
-          tipoOrigem: 'ADIANTAMENTO_PROFESSOR',
-          professorNome: adiant.professorNome,
-          valorProfessor: adiant.valor,
-          dataPagamentoProfessor: adiant.dataPagamento
-            ? formatDateBR(adiant.dataPagamento)
-            : formatDateBR(mov.dataHora.slice(0, 10)),
-          formaPagamentoProfessor: adiant.formaPagamento || 'PIX',
-          registradoPorProfessor: adiant.registradoPorNome || mov.registradoPorNome,
-          reciboConfirmadoPeloProfessor: adiant.status === 'CONFIRMADO',
-          dataConfirmacaoRecebimentoProfessor: adiant.confirmadoRecebimentoEm
-            ? formatDateTimeBR(adiant.confirmadoRecebimentoEm)
-            : undefined,
-          dataRegistroAdiantamento: adiant.pagoEm
-            ? formatDateTimeBR(adiant.pagoEm)
-            : formatDateTimeBR(mov.dataHora),
-          motivoAdiantamento: adiant.motivo,
-          referenciaCodigo: adiant.id,
-          statusReciboAdiantamento:
-            adiant.status === 'CONFIRMADO'
-              ? `Recebimento confirmado pelo professor em ${formatDateTimeBR(
-                  adiant.confirmadoRecebimentoEm || ''
-                )}`
-              : 'Aguardando confirmação do professor',
-          observacao: adiant.observacaoPagamento || adiant.motivo,
-        };
-      }
     } else if (mov.origem === 'ESTORNO') {
       return {
         movimentacao: mov,
@@ -2192,7 +1844,7 @@ class FinanceService {
   }
 
   // Dashboard Professor
-  public getDashboardProfessorStats(professorId: string): Omit<DashboardProfessorStats, 'meusPagamentosPendentes'> & { meusAdiantamentosPendentes: number } {
+  public getDashboardProfessorStats(_professorId: string): Omit<DashboardProfessorStats, 'meusPagamentosPendentes'> {
     const mensalidades = this.getMensalidades();
     const alunos = this.getAlunos();
 
@@ -2227,15 +1879,11 @@ class FinanceService {
       return aluno?.status === 'ATIVO' && m.status === 'AGUARDANDO_CONFIRMACAO';
     }).length;
 
-    // Adiantamentos continuam legados; repasses são consultados pela API no App.
-    const meusAdiantamentosPendentes = this.getMeusAdiantamentosPendentesConfirmacaoCount(professorId);
-
     return {
       totalAtrasados,
       totalVencemSemana: totalProximos7Dias,
       totalProximos7Dias,
       totalAguardandoConfirmacao,
-      meusAdiantamentosPendentes,
     };
   }
 
