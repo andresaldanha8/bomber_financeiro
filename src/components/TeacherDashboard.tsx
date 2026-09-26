@@ -1,13 +1,9 @@
 import React, { useState } from 'react';
 import { Aluno, Mensalidade } from '../types';
 import { useAuth } from '../context/AuthContext';
-import {
-  financeService,
-  formatCurrency,
-  formatDateBR,
-  getTodayDateStr,
-  getFutureDateStr,
-} from '../services/financeService';
+import { formatCurrency, formatDateBR, getTodayDateStr, getFutureDateStr, getCompetenciaFromDate } from '../services/financeService';
+import { getStudents } from '../services/studentsApi';
+import { queryMensalidades, MensalidadeApi } from '../services/mensalidadesApi';
 import {
   Search,
   UserPlus,
@@ -52,32 +48,158 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     'TODOS' | 'ATRASADOS' | 'PROXIMOS_7_DIAS' | 'AGUARDANDO'
   >('TODOS');
 
-  const stats = financeService.getDashboardProfessorStats(currentUser.id);
-  const todosAlunos = financeService.getAlunos(search, 'ATIVO');
+  // Dados carregados da API
+  const [todosAlunos, setTodosAlunos] = useState<Aluno[]>([]);
+  const [mensalidades, setMensalidades] = useState<MensalidadeApi[]>([]);
+
+  React.useEffect(() => {
+    let mounted = true;
+    // iniciar carregamento (estado local removido: apenas carregar dados)
+
+    Promise.all([getStudents(), queryMensalidades()])
+      .then(([students, mensalidadesResp]) => {
+        if (!mounted) return;
+        // getStudents() já retorna Aluno[] — usar diretamente e ordenar por nome
+        const alunosOrdenados = students.slice().sort((a, b) => a.nome.localeCompare(b.nome));
+        setTodosAlunos(alunosOrdenados);
+
+        // mensalidades API -> manter como vem
+        setMensalidades(mensalidadesResp);
+      })
+      .catch(() => {
+        // silenciar erro aqui: componente continuará renderizando com listas vazias
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Janela dinâmica que avança automaticamente conforme a data atual
   const hoje = getTodayDateStr();
   const hojeMais7 = getFutureDateStr(7);
 
+  // Agrupa mensalidades por studentId para consultas em memória
+  const mensalidadesByStudent = React.useMemo(() => {
+    const map = new Map<string, MensalidadeApi[]>();
+    for (const m of mensalidades) {
+      const sid = (m as MensalidadeApi).studentId;
+      if (!sid) continue;
+      const arr = map.get(sid) || [];
+      arr.push(m);
+      map.set(sid, arr);
+    }
+    return map;
+  }, [mensalidades]);
+
+  function getMensalidadeAtualDoAlunoLocal(alunoId: string): MensalidadeApi | undefined {
+    const list = mensalidadesByStudent.get(alunoId) || [];
+    // Prioriza a que está em aberto (ATRASADA, PENDENTE, AGUARDANDO_CONFIRMACAO)
+    const emAberto = list.find(
+      (m) => m.status === 'ATRASADA' || m.status === 'PENDENTE' || m.status === 'AGUARDANDO_CONFIRMACAO'
+    );
+    if (emAberto) return emAberto;
+    return list[0];
+  }
+
+  function isPagamentoInicialPendenteLocal(alunoId: string): boolean {
+    const list = mensalidadesByStudent.get(alunoId) || [];
+    if (list.length === 0) return false;
+    if (list.some((m) => m.status === 'QUITADA')) return false;
+    if (list.some((m) => m.status === 'AGUARDANDO_CONFIRMACAO')) return false;
+    const atual = getMensalidadeAtualDoAlunoLocal(alunoId);
+    return !!atual && (atual.status === 'PENDENTE' || atual.status === 'ATRASADA');
+  }
+
+  // Converte MensalidadeApi em Mensalidade (estrutura esperada pelo restante da UI)
+  function mapMensalidadeApiToMensalidade(m: MensalidadeApi, alunoNome?: string): Mensalidade {
+    const valorNum = typeof m.valor === 'number' ? m.valor : parseFloat(String(m.valor || '0')) || 0;
+    return {
+      id: m.id,
+      alunoId: m.studentId,
+      alunoNome: alunoNome || '',
+      competencia: m.competencia,
+      anoMes: m.anoMes || '',
+      valor: valorNum,
+      dataVencimento: m.dataVencimento,
+      status: m.status,
+    };
+  }
+
+  // Estatísticas do dashboard (mesma semântica do financeService)
+  const stats = React.useMemo(() => {
+    const mensalidadesAll = mensalidades;
+    const alunos = todosAlunos;
+
+    const totalAtrasados = mensalidadesAll.filter((m) => {
+      const aluno = alunos.find((a) => a.id === m.studentId);
+      if (!aluno || aluno.status !== 'ATIVO') return false;
+      if (m.status === 'QUITADA' || m.status === 'AGUARDANDO_CONFIRMACAO') return false;
+      if (isPagamentoInicialPendenteLocal(aluno.id)) return false;
+      return m.status === 'ATRASADA' || (m.status === 'PENDENTE' && m.dataVencimento < hoje);
+    }).length;
+
+    const totalProximos7Dias = mensalidadesAll.filter((m) => {
+      const aluno = alunos.find((a) => a.id === m.studentId);
+      if (!aluno || aluno.status !== 'ATIVO') return false;
+      if (m.status === 'QUITADA' || m.status === 'AGUARDANDO_CONFIRMACAO') return false;
+      if (isPagamentoInicialPendenteLocal(aluno.id)) return false;
+      return m.status === 'PENDENTE' && m.dataVencimento >= hoje && m.dataVencimento <= hojeMais7;
+    }).length;
+
+    const totalAguardandoConfirmacao = mensalidadesAll.filter((m) => {
+      const aluno = alunos.find((a) => a.id === m.studentId);
+      return aluno?.status === 'ATIVO' && m.status === 'AGUARDANDO_CONFIRMACAO';
+    }).length;
+
+    return {
+      totalAtrasados,
+      totalVencemSemana: totalProximos7Dias,
+      totalProximos7Dias,
+      totalAguardandoConfirmacao,
+    };
+  }, [mensalidades, todosAlunos, hoje, hojeMais7]);
+
+  // Aplica filtragem por status e busca (mesma semântica do financeService.getAlunos)
+  const filteredAlunos = React.useMemo(() => {
+    let list = todosAlunos.slice();
+    // manter apenas ATIVO por padrão (quando aplicável)
+    list = list.filter((a) => a.status === 'ATIVO');
+
+    if (search && search.trim() !== '') {
+      const rawQ = search.toLowerCase().trim();
+      const normQ = rawQ.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const qDigits = rawQ.replace(/\D/g, '');
+
+      list = list.filter((a) => {
+        const nomeLower = a.nome.toLowerCase();
+        const nomeNorm = nomeLower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const matchNome = nomeLower.includes(rawQ) || nomeNorm.includes(normQ);
+
+        const telLower = a.telefone.toLowerCase();
+        const matchTel = telLower.includes(rawQ);
+        const matchDigits = qDigits.length > 0 && a.telefone.replace(/\D/g, '').includes(qDigits);
+
+        return matchNome || matchTel || matchDigits;
+      });
+    }
+
+    return list.sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [todosAlunos, search]);
+
   // Mapeia alunos com suas respectivas mensalidades em aberto/atuais
-  const itens = todosAlunos.map((aluno) => {
-    const mensalidade = financeService.getMensalidadeAtualDoAluno(aluno.id);
+  const itens = filteredAlunos.map((aluno) => {
+    const mensalidade = getMensalidadeAtualDoAlunoLocal(aluno.id);
     const isQuitada = mensalidade?.status === 'QUITADA';
     const isAguardando = mensalidade?.status === 'AGUARDANDO_CONFIRMACAO';
-    const isPagamentoInicial = financeService.isPagamentoInicialPendente(aluno.id);
+    const isPagamentoInicial = isPagamentoInicialPendenteLocal(aluno.id);
 
     // Regras cirúrgicas de classificação:
-    // - considerar hoje até hoje + 7 dias;
-    // - alunos vencidos antes de hoje e ainda não quitados ficam em "EM ATRASO";
-    // - pagamentos já informados e aguardando confirmação permanecem em "AGUARDANDO";
-    // - novos alunos com pagamento inicial pendente não nascem nem ficam como atrasados;
-    // - não classificar mensalidade quitada como pendente/próxima.
     const isAtrasado =
       !isPagamentoInicial &&
       !isQuitada &&
       !isAguardando &&
-      (mensalidade?.status === 'ATRASADA' ||
-        (mensalidade?.status === 'PENDENTE' && mensalidade?.dataVencimento < hoje));
+      (mensalidade?.status === 'ATRASADA' || (mensalidade?.status === 'PENDENTE' && mensalidade?.dataVencimento < hoje));
 
     const isProximos7Dias =
       !isPagamentoInicial &&
@@ -364,8 +486,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               isAguardando,
               isQuitada,
             }) => {
-              const formaPagamento =
-                mensalidade?.ultimoPagamentoForma || 'PIX';
+              const mensalidadeLegacy = mensalidade ? mapMensalidadeApiToMensalidade(mensalidade, aluno.nome) : undefined;
+              const hasMensalidade = !!mensalidade;
 
               return (
                 <div
@@ -417,10 +539,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           <Calendar className="w-3.5 h-3.5 text-zinc-500" />
                           <span>
                             Venc.:{' '}
-                            {formatDateBR(
-                              mensalidade?.dataVencimento ||
-                                `2026-09-${String(aluno.diaVencimento).padStart(2, '0')}`
-                            )}
+                            {mensalidade
+                              ? formatDateBR(mensalidade.dataVencimento)
+                              : 'Sem mensalidade registrada'}
                           </span>
                         </span>
 
@@ -436,14 +557,18 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     {/* Valor Individual e Competência (Visíveis) */}
                     <div className="text-right shrink-0 flex items-center gap-1.5">
                       <div>
-                        <span className="text-sm font-black text-white block">
-                          {formatCurrency(
-                            mensalidade?.valor || aluno.valorMensalidade
-                          )}
-                        </span>
-                        <span className="text-[10px] text-zinc-400 uppercase font-semibold">
-                          {mensalidade?.competencia || 'Setembro/2026'}
-                        </span>
+                        {hasMensalidade ? (
+                          <>
+                            <span className="text-sm font-black text-white block">
+                              {formatCurrency(typeof mensalidade!.valor === 'number' ? mensalidade!.valor : parseFloat(String(mensalidade!.valor || '0')) || 0)}
+                            </span>
+                            <span className="text-[10px] text-zinc-400 uppercase font-semibold">
+                              {mensalidade!.competencia ? getCompetenciaFromDate(mensalidade!.competencia).competencia : ''}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-sm font-bold text-zinc-400">Sem mensalidade registrada</span>
+                        )}
                       </div>
                       {onEditStudent && (
                         <button
@@ -462,7 +587,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   {/* Linha Inferior: Forma de Pagamento / Ação Operacional */}
                   <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between">
                     <span className="text-[11px] text-zinc-400 font-medium">
-                      {isPagamentoInicial
+                      {!hasMensalidade
+                        ? 'Sem mensalidade registrada'
+                        : isPagamentoInicial
                         ? 'Pagamento de entrada pendente'
                         : isAguardando
                         ? 'Informado por você'
@@ -472,15 +599,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                     </span>
 
                     {/* Exibição da Forma de Pagamento Separada ou Ação de Pagamento */}
-                    {isAguardando ? (
+                    {!hasMensalidade ? (
+                      <span className="text-xs font-medium text-zinc-400">&mdash;</span>
+                    ) : isAguardando ? (
                       <div className="flex items-center gap-1.5">
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-black bg-white/10 text-white border border-white/15">
-                          {formaPagamento === 'DINHEIRO' ? (
-                            <Banknote className="w-3.5 h-3.5 text-lime-400" />
-                          ) : (
-                            <QrCode className="w-3.5 h-3.5 text-lime-400" />
-                          )}
-                          <span>{formaPagamento}</span>
+                          <span>Não informado</span>
                         </span>
                       </div>
                     ) : isQuitada ? (
@@ -491,7 +615,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                       <button
                         type="button"
                         id={`btn-registrar-pagamento-aluno-${aluno.id}`}
-                        onClick={() => onOpenPaymentModal(aluno, mensalidade)}
+                        onClick={() => onOpenPaymentModal(aluno, mensalidadeLegacy)}
                         className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#D4FF00] to-[#16A34A] hover:brightness-105 text-black text-xs font-black transition-all shadow-md shadow-lime-500/20 active:scale-95"
                       >
                         <span>Registrar Pagamento</span>
@@ -505,7 +629,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           )}
 
           {/* Ação Discreta "Ver todos" no Rodapé do Resumo */}
-          {isLimited && onNavigateToAlunos && todosAlunos.length > HOME_LIMIT && (
+          {isLimited && onNavigateToAlunos && filteredAlunos.length > HOME_LIMIT && (
             <div className="pt-2 text-center">
               <button
                 type="button"
@@ -513,7 +637,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 onClick={onNavigateToAlunos}
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-xs font-bold border border-white/10 transition-all active:scale-95"
               >
-                <span>Ver todos na área Alunos ({todosAlunos.length})</span>
+                <span>Ver todos na área Alunos ({filteredAlunos.length})</span>
                 <ChevronRight className="w-3.5 h-3.5 text-lime-400" />
               </button>
             </div>
