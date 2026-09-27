@@ -7,13 +7,14 @@
     "dev": "vite --port=3000 --host=0.0.0.0",
     "dev:server": "tsx server/index.ts",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
-    "build": "vite build",
+    "build": "npm run build:server && npm run build:client",
+    "build:client": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "build:server": "npm run prisma:generate && tsc -p tsconfig.server.json",
-    "build:prod": "npm run build:server && npm run build",
+    "build:prod": "npm run build",
     "start": "node dist/server/index.js"
   },
   "dependencies": {
