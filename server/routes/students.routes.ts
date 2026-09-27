@@ -1,18 +1,18 @@
 import { Router } from 'express';
 
-import { prisma } from '../lib/prisma';
-import { executarTransacaoComRetry } from '../services/transactionRetry';
-import { abrirPeriodoAtivoInicial, criarMensalidadeInicial } from '../services/mensalidades.service';
+import { prisma } from '../lib/prisma.js';
+import { executarTransacaoComRetry } from '../services/transactionRetry.js';
+import { abrirPeriodoAtivoInicial, criarMensalidadeInicial } from '../services/mensalidades.service.js';
 
 import {
   AuthenticatedRequest,
   requireAuth,
-} from '../middleware/auth.middleware';
+} from '../middleware/auth.middleware.js';
 import {
   aplicarTransicaoStatusStudent,
   TransicaoStatusStudent,
-} from '../services/mensalidades.service';
-import { dataCivilDoInstante } from '../domain/financeDates';
+} from '../services/mensalidades.service.js';
+import { dataCivilDoInstante } from '../domain/financeDates.js';
 
 const router = Router();
 

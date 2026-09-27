@@ -1,6 +1,6 @@
 import { Router, type Response } from 'express';
-import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.middleware';
-import * as RepassesService from '../services/repasses.service';
+import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import * as RepassesService from '../services/repasses.service.js';
 
 const router = Router();
 router.use(requireAuth);

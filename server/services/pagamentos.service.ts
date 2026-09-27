@@ -1,8 +1,8 @@
-import { prisma } from '../lib/prisma';
-import { executarTransacaoComRetry } from './transactionRetry';
-import { normalizarDataCivil } from '../domain/financeDates';
-import * as mensalidadesService from './mensalidades.service';
-import type { Prisma } from '../../src/generated/prisma/client';
+import { prisma } from '../lib/prisma.js';
+import { executarTransacaoComRetry } from './transactionRetry.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
+import * as mensalidadesService from './mensalidades.service.js';
+import type { Prisma } from '@prisma/client';
 
 type PagamentoParaCaixa = {
   id: string;

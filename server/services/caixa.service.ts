@@ -1,6 +1,6 @@
-import { prisma } from '../lib/prisma';
-import { Prisma, type MovimentoCaixa, type TipoMovimentoCaixa, type OrigemMovimentoCaixa } from '../../src/generated/prisma/client';
-import { dataCivilDoInstante, normalizarDataCivil } from '../domain/financeDates';
+import { prisma } from '../lib/prisma.js';
+import { Prisma, type MovimentoCaixa, type TipoMovimentoCaixa, type OrigemMovimentoCaixa } from '@prisma/client';
+import { dataCivilDoInstante, normalizarDataCivil } from '../domain/financeDates.js';
 
 export class CaixaValidationError extends Error {}
 export class SaldoInicialConflictError extends Error {

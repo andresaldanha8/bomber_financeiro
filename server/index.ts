@@ -3,15 +3,15 @@ import 'dotenv/config';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 
-import authRoutes from './routes/auth.routes';
-import usersRoutes from './routes/users.routes';
-import studentsRoutes from './routes/students.routes';
-import mensalidadesRoutes from './routes/mensalidades.routes';
-import pagamentosRoutes from './routes/pagamentos.routes';
-import caixaRoutes from './routes/caixa.routes';
-import despesasRoutes from './routes/despesas.routes';
-import repassesRoutes from './routes/repasses.routes';
-import adiantamentosRoutes from './routes/adiantamentos.routes';
+import authRoutes from './routes/auth.routes.js';
+import usersRoutes from './routes/users.routes.js';
+import studentsRoutes from './routes/students.routes.js';
+import mensalidadesRoutes from './routes/mensalidades.routes.js';
+import pagamentosRoutes from './routes/pagamentos.routes.js';
+import caixaRoutes from './routes/caixa.routes.js';
+import despesasRoutes from './routes/despesas.routes.js';
+import repassesRoutes from './routes/repasses.routes.js';
+import adiantamentosRoutes from './routes/adiantamentos.routes.js';
 
 const app = express();
 

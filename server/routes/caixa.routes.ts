@@ -1,7 +1,7 @@
 import express from 'express';
-import { requireAuth, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware';
-import * as CaixaService from '../services/caixa.service';
-import { TipoMovimentoCaixa, OrigemMovimentoCaixa } from '../../src/generated/prisma/client';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import * as CaixaService from '../services/caixa.service.js';
+import { TipoMovimentoCaixa, OrigemMovimentoCaixa } from '@prisma/client';
 
 const router = express.Router();
 

@@ -1,8 +1,8 @@
 import { Router } from 'express';
 
-import { prisma } from '../lib/prisma';
-import { requireAuth, AuthenticatedRequest } from '../middleware/auth.middleware';
-import { normalizarDataCivil } from '../domain/financeDates';
+import { prisma } from '../lib/prisma.js';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
 
 const router = Router();
 

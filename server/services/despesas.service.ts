@@ -1,8 +1,8 @@
-import { prisma } from '../lib/prisma';
-import { executarTransacaoComRetry } from './transactionRetry';
-import { normalizarDataCivil } from '../domain/financeDates';
-import { Prisma } from '../../src/generated/prisma/client';
-import { DespesaCategoria } from '../../src/generated/prisma/enums';
+import { prisma } from '../lib/prisma.js';
+import { executarTransacaoComRetry } from './transactionRetry.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
+import { Prisma } from '@prisma/client';
+import { DespesaCategoria } from '@prisma/client';
 
 // Fonte única de categorias técnicas aceitas para despesas
 export const VALID_CATEGORIES: string[] = [

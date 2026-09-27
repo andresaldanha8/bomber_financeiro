@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 
-import { getSessionUser } from '../services/auth.service';
+import { getSessionUser } from '../services/auth.service.js';
 
 const SESSION_COOKIE = 'bomber_session';
 

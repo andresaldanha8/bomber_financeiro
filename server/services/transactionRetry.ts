@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from '../../src/generated/prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
 /**
  * Até 3 tentativas TOTAIS, cada uma com nova transação ReadCommitted.

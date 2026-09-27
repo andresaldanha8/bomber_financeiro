@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { requireAuth, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware';
-import * as DespesasService from '../services/despesas.service';
-import { normalizarDataCivil } from '../domain/financeDates';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import * as DespesasService from '../services/despesas.service.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
 
 const router = Router();
 

@@ -1,10 +1,10 @@
-import { Prisma } from '../../src/generated/prisma/client';
-import type { EntryCondition, Student, User, Mensalidade, StudentActivityPeriod } from '../../src/generated/prisma/client';
+import { Prisma } from '@prisma/client';
+import type { EntryCondition, Student, User, Mensalidade, StudentActivityPeriod } from '@prisma/client';
 import {
   type DataCivil, normalizarDataCivil, compararDatasCivis, obterCompetencia,
   obterCompetenciaSeguinte, calcularVencimento, validarDiaBase,
   primeiraCompetenciaAposReativacao,
-} from '../domain/financeDates';
+} from '../domain/financeDates.js';
 
 type Actor = Pick<User, 'id'>;
 

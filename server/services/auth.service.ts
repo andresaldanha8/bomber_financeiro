@@ -5,7 +5,7 @@ import {
   timingSafeEqual,
 } from 'node:crypto';
 import { promisify } from 'node:util';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../lib/prisma.js';
 
 const scrypt = promisify(scryptCallback);
 

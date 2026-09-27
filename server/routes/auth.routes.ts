@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../lib/prisma.js';
 import {
   createSession,
   getSessionUser,
   revokeSession,
   verifyPassword,
-} from '../services/auth.service';
+} from '../services/auth.service.js';
 
 const router = Router();
 

@@ -1,6 +1,6 @@
 import { Router, type Response } from 'express';
-import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.middleware';
-import * as AdiantamentosService from '../services/adiantamentos.service';
+import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import * as AdiantamentosService from '../services/adiantamentos.service.js';
 
 const router = Router();
 router.use(requireAuth);

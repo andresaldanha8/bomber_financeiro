@@ -1,17 +1,17 @@
 import { Router } from 'express';
 
-import { prisma } from '../lib/prisma';
+import { prisma } from '../lib/prisma.js';
 import {
   AuthenticatedRequest,
   requireAuth,
   requireAdmin,
-} from '../middleware/auth.middleware';
+} from '../middleware/auth.middleware.js';
 import {
   registrarPagamentoProfessor,
   registrarPagamentoAdminDireto,
   confirmarPagamentoPorAdmin,
-} from '../services/pagamentos.service';
-import { normalizarDataCivil } from '../domain/financeDates';
+} from '../services/pagamentos.service.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
 
 const router = Router();
 

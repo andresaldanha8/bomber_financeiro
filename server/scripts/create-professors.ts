@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
-import { prisma } from '../lib/prisma';
-import { hashPassword } from '../services/auth.service';
+import { prisma } from '../lib/prisma.js';
+import { hashPassword } from '../services/auth.service.js';
 
 type ProfessorSeed = {
   id: string;

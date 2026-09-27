@@ -1,8 +1,8 @@
-import { Prisma } from '../../src/generated/prisma/client';
-import { prisma } from '../lib/prisma';
-import { normalizarDataCivil } from '../domain/financeDates';
-import type { AuthenticatedRequest } from '../middleware/auth.middleware';
-import { executarTransacaoComRetry } from './transactionRetry';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../lib/prisma.js';
+import { normalizarDataCivil } from '../domain/financeDates.js';
+import type { AuthenticatedRequest } from '../middleware/auth.middleware.js';
+import { executarTransacaoComRetry } from './transactionRetry.js';
 
 type Ator = NonNullable<AuthenticatedRequest['authUser']>;
 
