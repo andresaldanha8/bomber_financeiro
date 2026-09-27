@@ -13,6 +13,7 @@
     "lint": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "build:server": "npm run prisma:generate && tsc -p tsconfig.server.json",
+    "build:prod": "npm run build:server && npm run build",
     "start": "node dist/server/index.js"
   },
   "dependencies": {

@@ -1,5 +1,7 @@
 import 'dotenv/config';
 
+import { fileURLToPath } from 'node:url';
+
 import express from 'express';
 import cookieParser from 'cookie-parser';
 
@@ -36,6 +38,18 @@ app.use('/api/caixa', caixaRoutes);
 app.use('/api/despesas', despesasRoutes);
 app.use('/api/repasses', repassesRoutes);
 app.use('/api/adiantamentos', adiantamentosRoutes);
+
+app.use('/api', (_req, res) => {
+  res.status(404).json({ message: 'Rota não encontrada.' });
+});
+
+if (process.env.NODE_ENV === 'production') {
+  const clientDir = fileURLToPath(
+    new URL('../client/', import.meta.url),
+  );
+
+  app.use(express.static(clientDir));
+}
 
 app.listen(PORT, () => {
   console.log(`Bomber Financeiro API rodando em http://localhost:${PORT}`);
